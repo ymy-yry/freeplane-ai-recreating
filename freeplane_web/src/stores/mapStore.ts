@@ -21,7 +21,7 @@ export const useMapStore = defineStore('map', () => {
 
   const startPolling = () => {
     if (pollingInterval) clearInterval(pollingInterval)
-    pollingInterval = setInterval(loadMap, 2000)
+    pollingInterval = setInterval(loadMap, 3000)
   }
 
   const stopPolling = () => {
@@ -46,5 +46,35 @@ export const useMapStore = defineStore('map', () => {
     await loadMap()
   }
 
-  return { currentMap, loading, loadMap, startPolling, stopPolling, createNode, editNode, deleteNode }
+  const toggleNodeFold = async (nodeId: string) => {
+    if (!currentMap.value) return
+
+    const findNode = (node: any): any => {
+      if (node.id === nodeId) return node
+      return node.children?.find(findNode)
+    }
+    const target = findNode(currentMap.value.root)
+    if (!target) return
+
+    const newFolded = !target.folded
+
+    try {
+      await mapApi.toggleFold(currentMap.value.mapId, nodeId, newFolded)
+      await loadMap()        // 关键：立即从后端重新加载，确保状态一致
+    } catch (e) {
+      console.error('折叠操作失败', e)
+    }
+  }
+
+  return {
+    currentMap,
+    loading,
+    loadMap,
+    startPolling,
+    stopPolling,
+    createNode,
+    editNode,
+    deleteNode,
+    toggleNodeFold
+  }
 })

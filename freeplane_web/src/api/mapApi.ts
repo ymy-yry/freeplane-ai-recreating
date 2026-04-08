@@ -19,3 +19,7 @@ export const editNode = async (mapId: string, nodeId: string, text: string) => {
 export const deleteNode = async (mapId: string, nodeId: string) => {
   await api.post('/nodes/delete', { mapId, nodeId })
 }
+
+export const toggleFold = async (mapId: string, nodeId: string, folded: boolean) => {
+  await api.post('/nodes/toggle-fold', { mapId, nodeId, folded })
+}

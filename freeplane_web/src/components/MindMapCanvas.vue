@@ -7,26 +7,15 @@
 		:min-zoom="0.2"
 		:max-zoom="2"
 		@node-double-click="handleDoubleClick"
-		@node-context-menu="handleContextMenu"
-		@nodes-change="onNodesChange"
+		:nodes-draggable="true"
+		:edges-updatable="false"
+		:connection-line-style="{ stroke: '#666', strokeWidth: 2 }"
+		:default-edge-options="{ type: 'bezier' }"
 	  >
 		<Background variant="dots" />
 		<Controls />
 	  </VueFlow>
   
-	  <!-- 右键菜单 -->
-	  <NodeContextMenu
-		:visible="contextMenu.visible"
-		:x="contextMenu.x"
-		:y="contextMenu.y"
-		:node-id="contextMenu.nodeId"
-		@edit="handleEdit"
-		@create-child="handleCreateChild"
-		@delete="handleDelete"
-		@close="contextMenu.visible = false"
-	  />
-  
-	  <!-- 编辑面板 -->
 	  <NodeEditPanel
 		:visible="editPanel.visible"
 		:node-id="editPanel.nodeId"
@@ -35,93 +24,124 @@
 		@cancel="editPanel.visible = false"
 	  />
   
-	  <!-- 工具栏 -->
-	  <Toolbar />
+	  <ActionModal
+		:visible="actionModal.visible"
+		:title="actionModal.title"
+		:mode="actionModal.mode"
+		@new-child="handleNewChildConfirm"
+		@fold="handleFoldConfirm"
+		@delete="handleDelete"
+		@confirm-input="handleInputConfirm"
+		@cancel="closeActionModal"
+	  />
+  
+	  <Toolbar :vue-flow="vueFlow" />
 	</div>
   </template>
   
   <script setup lang="ts">
-  import { ref, onMounted, onUnmounted, watch } from 'vue'
-  import { VueFlow } from '@vue-flow/core'
+  import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+  import { VueFlow, useVueFlow, type Node, type Edge } from '@vue-flow/core'
   import { Background } from '@vue-flow/background'
   import { Controls } from '@vue-flow/controls'
-  import type { Node, Edge } from '@vue-flow/core'
   
   import { useMapStore } from '@/stores/mapStore'
-  import NodeContextMenu from './NodeContextMenu.vue'
   import NodeEditPanel from './NodeEditPanel.vue'
   import Toolbar from './Toolbar.vue'
+  import ActionModal from './ActionModal.vue'
   import { treeToFlow } from '@/utils/treeToFlow'
   
   const store = useMapStore()
+  const vueFlow = useVueFlow()
   
   const nodes = ref<Node[]>([])
   const edges = ref<Edge[]>([])
   
-  const contextMenu = ref({
+  const editPanel = ref({ visible: false, nodeId: '', text: '' })
+  
+  const actionModal = ref({
 	visible: false,
-	x: 0,
-	y: 0,
-	nodeId: ''
+	title: '',
+	mode: 'choose' as 'choose' | 'input' | 'delete',
+	targetNodeId: '' as string
   })
   
-  const editPanel = ref({
-	visible: false,
-	nodeId: '',
-	text: ''
-  })
-  
-  const updateFlow = () => {
+  // **加强版更新**：每次都生成全新 nodes/edges 数组 + 强制 fitView
+  const updateFlow = async () => {
 	if (!store.currentMap?.root) return
-	const { nodes: n, edges: e } = treeToFlow(store.currentMap.root)
-	nodes.value = n
-	edges.value = e
+  
+	const { nodes: newNodes, edges: newEdges } = treeToFlow(store.currentMap.root)
+  
+	// 使用全新数组引用，确保 Vue Flow 完全重新渲染
+	nodes.value = newNodes.map((newNode: Node) => {
+	  const existing = nodes.value.find((n: Node) => n.id === newNode.id)
+	  return existing ? { ...newNode, position: { ...existing.position } } : newNode
+	})
+  
+	edges.value = [...newEdges]
+  
+	// 强制刷新布局
+	await nextTick()
+	vueFlow.fitView({ padding: 0.15, duration: 200 })
+  }
+  
+  const handleKeyDown = (e: KeyboardEvent) => {
+	if (e.key !== 'Tab') return
+	e.preventDefault()
+  
+	const selectedNode = vueFlow.nodes.value.find((n: any) => n.selected)
+	if (!selectedNode) {
+	  if (nodes.value.length > 0) {
+		actionModal.value = { visible: true, title: '新建子节点', mode: 'input', targetNodeId: nodes.value[0].id }
+	  }
+	  return
+	}
+  
+	const isFolded = !!(selectedNode.data as any)?.folded || !!(selectedNode.data as any)?.originalNode?.folded
+  
+	if (isFolded) {
+	  store.toggleNodeFold(selectedNode.id)
+	} else {
+	  actionModal.value = { visible: true, title: '请选择操作', mode: 'choose', targetNodeId: selectedNode.id }
+	}
+  }
+  
+  const closeActionModal = () => { actionModal.value.visible = false }
+  
+  const handleNewChildConfirm = () => {
+	closeActionModal()
+	actionModal.value = { visible: true, title: '新建子节点', mode: 'input', targetNodeId: actionModal.value.targetNodeId }
+  }
+  
+  const handleFoldConfirm = () => {
+	closeActionModal()
+	if (actionModal.value.targetNodeId) {
+	  store.toggleNodeFold(actionModal.value.targetNodeId)
+	}
+  }
+  
+  const handleDelete = () => {
+	if (actionModal.value.mode === 'choose') {
+	  closeActionModal()
+	  actionModal.value = { visible: true, title: '删除节点', mode: 'delete', targetNodeId: actionModal.value.targetNodeId }
+	} else if (actionModal.value.mode === 'delete') {
+	  if (actionModal.value.targetNodeId) {
+		store.deleteNode(actionModal.value.targetNodeId)
+	  }
+	  closeActionModal()
+	}
+  }
+  
+  const handleInputConfirm = (text: string) => {
+	closeActionModal()
+	if (actionModal.value.targetNodeId && text) {
+	  store.createNode(actionModal.value.targetNodeId, text)
+	}
   }
   
   const handleDoubleClick = (event: any) => {
 	const node = event.node
-	editPanel.value = {
-	  visible: true,
-	  nodeId: node.id,
-	  text: node.data?.text || ''
-	}
-  }
-  
-  const handleContextMenu = (event: any) => {
-	event.preventDefault()
-	contextMenu.value = {
-	  visible: true,
-	  x: event.event.clientX,
-	  y: event.event.clientY,
-	  nodeId: event.node.id
-	}
-  }
-  
-  const handleEdit = (nodeId: string) => {
-	const node = nodes.value.find(n => n.id === nodeId)
-	if (node) {
-	  editPanel.value = {
-		visible: true,
-		nodeId,
-		text: node.data?.text || ''
-	  }
-	}
-	contextMenu.value.visible = false
-  }
-  
-  const handleCreateChild = (nodeId: string) => {
-	const text = prompt('请输入新子节点文本：')
-	if (text && text.trim()) {
-	  store.createNode(nodeId, text.trim())
-	}
-	contextMenu.value.visible = false
-  }
-  
-  const handleDelete = (nodeId: string) => {
-	if (confirm('确认删除该节点及其所有子节点吗？')) {
-	  store.deleteNode(nodeId)
-	}
-	contextMenu.value.visible = false
+	editPanel.value = { visible: true, nodeId: node.id, text: (node.data as any)?.label || '' }
   }
   
   const handleSaveEdit = (nodeId: string, text: string) => {
@@ -129,28 +149,24 @@
 	editPanel.value.visible = false
   }
   
-  const onNodesChange = () => {
-	// 拖拽后可在此扩展本地位置保存逻辑
-  }
-  
-  // 生命周期
   onMounted(() => {
 	store.loadMap()
 	store.startPolling()
+	window.addEventListener('keydown', handleKeyDown)
   })
   
   onUnmounted(() => {
 	store.stopPolling()
+	window.removeEventListener('keydown', handleKeyDown)
   })
   
-  // 数据更新时刷新画布
-  watch(() => store.currentMap, updateFlow, { immediate: true, deep: true })
+  watch(() => store.currentMap, updateFlow, { deep: true })
   </script>
   
   <style scoped>
-  .mindmap-container {
-	height: 100vh;
-	width: 100vw;
-	position: relative;
+  .mindmap-container { 
+	height: 100vh; 
+	width: 100vw; 
+	position: relative; 
   }
   </style>

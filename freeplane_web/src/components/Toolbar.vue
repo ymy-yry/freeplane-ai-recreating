@@ -1,14 +1,9 @@
 <template>
 	<div class="toolbar">
-	  <button @click="handleFitView" title="适应画布">
-		🔍 适应
-	  </button>
-	  <button @click="handleCenterView" title="居中导图">
-		📍 居中
-	  </button>
-	  <button @click="handleRefresh" title="刷新导图（同步 Freeplane）">
-		🔄 刷新
-	  </button>
+	  <button @click="handleFitView" title="适应画布">🔍 适应</button>
+	  <button @click="handleCenterView" title="居中导图">📍 居中</button>
+	  <button @click="handleRefresh" title="刷新导图">🔄 刷新</button>
+	  
 	  <input
 		v-model="searchQuery"
 		type="text"
@@ -23,33 +18,30 @@
   <script setup lang="ts">
   import { ref } from 'vue'
   import { useMapStore } from '@/stores/mapStore'
-  import { useVueFlow } from '@vue-flow/core'
+  import type { UseVueFlow } from '@vue-flow/core'
+  
+  const props = defineProps<{
+	vueFlow: UseVueFlow
+  }>()
   
   const store = useMapStore()
-  const { fitView: vueFlowFitView, setCenter } = useVueFlow()
-  
   const searchQuery = ref('')
   
-  // 适应画布
   const handleFitView = () => {
-	vueFlowFitView({ padding: 0.2, duration: 300 })
+	props.vueFlow.fitView({ padding: 0.2, duration: 300 })
   }
   
-  // 居中导图
   const handleCenterView = () => {
-	setCenter(0, 0, { zoom: 1, duration: 300 })
+	props.vueFlow.setCenter(0, 0, { zoom: 1, duration: 300 })
   }
   
-  // 刷新导图（触发 store 轮询）
   const handleRefresh = async () => {
 	await store.loadMap()
   }
   
-  // 搜索节点（后续可扩展高亮功能）
   const handleSearch = () => {
-	if (!searchQuery.value.trim() || !store.currentMap) return
+	if (!searchQuery.value.trim()) return
 	console.log('[搜索] 关键词：', searchQuery.value)
-	// TODO: 成员B 可在此处调用 nodeApi.searchNodes 并高亮节点
 	searchQuery.value = ''
   }
   </script>
@@ -70,14 +62,11 @@
 	z-index: 1000;
   }
   
-  button {
+  button, .search-input {
 	padding: 6px 14px;
-	background: #fff;
 	border: 1px solid #ddd;
 	border-radius: 6px;
-	cursor: pointer;
 	font-size: 14px;
-	transition: all 0.2s;
   }
   
   button:hover {
@@ -86,12 +75,7 @@
   }
   
   .search-input {
-	padding: 6px 14px;
-	border: 1px solid #ddd;
-	border-radius: 6px;
 	width: 180px;
-	font-size: 14px;
-	outline: none;
   }
   
   .search-input:focus {
