@@ -1,0 +1,91 @@
+// copy gitinfo.txt from root (necessary when building from
+// src/srcpure because git is not available!)
+task copyGitTxt(type: Copy) {
+    onlyIf { new File(rootDir, 'gitinfo.txt').exists() }
+
+    from(rootDir) {
+        include('gitinfo.txt')
+    }
+    into(globalBin)
+}
+
+// copy gitinfo.properties from root (necessary when building from
+// src/srcpure because git is not available!)
+task copyGitProperty(type: Copy) {
+    onlyIf { new File(rootDir, 'gitinfo.properties').exists() }
+
+    from(rootDir) {
+        include('gitinfo.properties')
+    }
+    into(globalBin + '/resources')
+}
+
+
+task createGitProperty {
+    // for src/srcpure tarballs, /gitinfo.txt exists, so we don't call git
+    // (which is not available)
+	def gitInfoFile = new File(rootDir, 'gitinfo.txt')
+    onlyIf {
+        def shouldRun = !gitInfoFile.exists()
+        if (!shouldRun) {
+            logger.lifecycle("createGitProperty: skipped because ${gitInfoFile} exists")
+        }
+        shouldRun
+    }
+
+
+	doLast {
+        def execOps = project.services.get(org.gradle.process.ExecOperations)
+		def whoami
+		def revisionHash
+		def execResult
+		try {
+            execResult = execOps.exec {
+                commandLine 'git', '--version'
+                ignoreExitValue = true
+            }
+            if (execResult.exitValue != 0) {
+                return
+            }
+
+			new ByteArrayOutputStream().withStream { os ->
+				execResult = execOps.exec {
+					commandLine  'git', 'config', 'user.name'
+					standardOutput = os
+					ignoreExitValue = true
+				}
+				whoami = os.toString().trim()
+			}
+			 if(execResult.exitValue != 0)
+				throw new GradleException("createGitProperty failed: git config user.name exit=${execResult.exitValue}")
+
+			new ByteArrayOutputStream().withStream { os ->
+				execResult = execOps.exec {
+					commandLine 'git', 'log', '--pretty=format:%H', '-n1'
+					standardOutput = os
+					ignoreExitValue = true
+				}
+				revisionHash = os.toString().trim()
+			}
+
+			 if(execResult.exitValue != 0)
+				throw new GradleException("createGitProperty failed: git log exit=${execResult.exitValue}")
+		}
+		catch (Exception) {
+			return
+		}
+
+		def timestamp=new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone("UTC"))
+		new File(globalBin, 'gitinfo.txt').write "git-revision=$revisionHash $whoami $timestamp"
+			 
+        // create gitinfo.properties!
+        copy {
+            from(globalBin) {
+                include('gitinfo.txt')
+                rename('gitinfo.txt', 'gitinfo.properties')
+                filter(org.apache.tools.ant.filters.EscapeUnicode)
+            }
+            into(globalBin + '/resources')
+        }
+    }
+}
