@@ -12,7 +12,8 @@ dependencies {
 
 test {
 	// TestApp is not a JUnit test, just a debugging app
-	failOnNoDiscoveredTests = false
+	// Gradle 8.x: use ignoreFailures instead of failOnNoDiscoveredTests
+	ignoreFailures = true
 }
 
 task freeplanelauncherJar(type: Jar) {

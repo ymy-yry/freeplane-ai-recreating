@@ -4,6 +4,14 @@
 	  <button @click="handleCenterView" title="居中导图">📍 居中</button>
 	  <button @click="handleRefresh" title="刷新导图">🔄 刷新</button>
 	  
+	  <div class="toolbar-divider"></div>
+	  
+	  <button @click="handleExport" title="导出导图" class="export-btn">💾 导出</button>
+	  <button @click="handleExportMM" title="导出为 Freeplane 格式" class="export-btn">📄 .mm</button>
+	  <button @click="handleExportJSON" title="导出为 JSON 备份" class="export-btn">📦 .json</button>
+	  
+	  <div class="toolbar-divider"></div>
+	  
 	  <input
 		v-model="searchQuery"
 		type="text"
@@ -18,10 +26,10 @@
   <script setup lang="ts">
   import { ref } from 'vue'
   import { useMapStore } from '@/stores/mapStore'
-  import type { UseVueFlow } from '@vue-flow/core'
+  import { exportToMM, exportToJSON, showExportDialog } from '@/utils/exportUtils'
   
   const props = defineProps<{
-	vueFlow: UseVueFlow
+	vueFlow: any
   }>()
   
   const store = useMapStore()
@@ -37,6 +45,30 @@
   
   const handleRefresh = async () => {
 	await store.loadMap()
+  }
+  
+  const handleExport = () => {
+	if (!store.currentMap) {
+	  alert('当前没有打开的导图')
+	  return
+	}
+	showExportDialog(store.currentMap)
+  }
+  
+  const handleExportMM = () => {
+	if (!store.currentMap) {
+	  alert('当前没有打开的导图')
+	  return
+	}
+	exportToMM(store.currentMap)
+  }
+  
+  const handleExportJSON = () => {
+	if (!store.currentMap) {
+	  alert('当前没有打开的导图')
+	  return
+	}
+	exportToJSON(store.currentMap)
   }
   
   const handleSearch = () => {
@@ -76,6 +108,24 @@
   
   .search-input {
 	width: 180px;
+  }
+  
+  .toolbar-divider {
+	width: 1px;
+	height: 24px;
+	background: #ddd;
+	margin: 0 4px;
+  }
+  
+  .export-btn {
+	background: #e8f5e9;
+	border-color: #4caf50;
+  }
+  
+  .export-btn:hover {
+	background: #4caf50;
+	color: white;
+	border-color: #4caf50;
   }
   
   .search-input:focus {

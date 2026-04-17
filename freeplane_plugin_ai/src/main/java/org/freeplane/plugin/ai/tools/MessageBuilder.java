@@ -20,6 +20,30 @@ public class MessageBuilder {
             + "Treat the latest profile change as authoritative. "
             + "Older profile changes may omit profile definition and include only "
             + "\"Now you have the profile <Name>.\"";
+    
+    // Agent 增强：思维链指导
+    private static final String CHAIN_OF_THOUGHT_GUIDANCE =
+        "For complex tasks, think step-by-step:\n"
+            + "1. Understand the user's intent\n"
+            + "2. Plan your approach\n"
+            + "3. Execute tools as needed\n"
+            + "4. Verify results before responding\n"
+            + "5. Provide clear, structured output";
+    
+    // Agent 增强：工具使用策略
+    private static final String TOOL_USAGE_STRATEGY =
+        "Tool usage best practices:\n"
+            + "- Use tools when they can help achieve the goal\n"
+            + "- Combine multiple tool calls when appropriate\n"
+            + "- Handle tool errors gracefully\n"
+            + "- Always validate tool arguments before calling";
+    
+    // Agent 增强：质量检查
+    private static final String QUALITY_CHECK_GUIDANCE =
+        "Before finalizing your response:\n"
+            + "- Ensure all user requirements are met\n"
+            + "- Verify map/node operations succeeded\n"
+            + "- Check for consistency and completeness";
     @FunctionalInterface
     interface MessageTextProvider {
         String getMessageText();
@@ -37,8 +61,13 @@ public class MessageBuilder {
 
     public String buildForChat() {
         String message = messageTextProvider.getMessageText();
-        String guidance = MAP_SELECTION_GUIDANCE + "\n\n" + PROFILE_CONTROL_GUIDANCE + "\n\n"
-            + MARKDOWN_RESPONSE_GUIDANCE + "\n\n" + TOOL_CALL_REQUEST_WRAPPER_GUIDANCE;
+        String guidance = MAP_SELECTION_GUIDANCE + "\n\n" 
+            + PROFILE_CONTROL_GUIDANCE + "\n\n"
+            + MARKDOWN_RESPONSE_GUIDANCE + "\n\n" 
+            + TOOL_CALL_REQUEST_WRAPPER_GUIDANCE + "\n\n"
+            + CHAIN_OF_THOUGHT_GUIDANCE + "\n\n"
+            + TOOL_USAGE_STRATEGY + "\n\n"
+            + QUALITY_CHECK_GUIDANCE;
         if (message == null) {
             return guidance;
         }
