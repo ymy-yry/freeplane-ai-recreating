@@ -176,8 +176,9 @@ apt_generated
 .AppleDouble
 .LSOverride
 
-# Icon must end with two \r
-Icon
+# Icon must end with two \r (macOS specific)
+# Only ignore files named exactly "Icon" followed by carriage return
+Icon\r\r
 # Thumbnails
 ._*
 # Files that might appear in the root of a volume
