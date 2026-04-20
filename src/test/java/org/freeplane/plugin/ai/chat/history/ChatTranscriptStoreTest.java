@@ -1,0 +1,71 @@
+package org.freeplane.plugin.ai.chat.history;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Arrays;
+import java.util.List;
+import org.junit.Test;
+
+public class ChatTranscriptStoreTest {
+
+    @Test
+    public void saveAndLoad_preservesSystemRoles() throws IOException {
+        Path tempDir = Files.createTempDirectory("chat-transcripts");
+        try {
+            ChatTranscriptStore store = new ChatTranscriptStore(new ObjectMapper(), tempDir);
+            ChatTranscriptRecord record = new ChatTranscriptRecord();
+            List<ChatTranscriptEntry> entries = Arrays.asList(
+                new ChatTranscriptEntry(ChatTranscriptRole.USER, "user"),
+                new ChatTranscriptEntry(ChatTranscriptRole.ASSISTANT, "assistant"),
+                new AssistantProfileTranscriptEntry("profile-a", "A sayer", true),
+                new ChatTranscriptEntry(ChatTranscriptRole.REMOVED_FOR_SPACE_SYSTEM, "removed"));
+            record.setEntries(entries);
+
+            ChatTranscriptId id = store.save(record, null);
+            ChatTranscriptRecord loaded = store.load(id);
+
+            assertThat(loaded).isNotNull();
+            assertThat(loaded.getEntries())
+                .extracting(ChatTranscriptEntry::getRole)
+                .containsExactly(
+                    ChatTranscriptRole.USER,
+                    ChatTranscriptRole.ASSISTANT,
+                    ChatTranscriptRole.ASSISTANT_PROFILE_SYSTEM,
+                    ChatTranscriptRole.REMOVED_FOR_SPACE_SYSTEM);
+            assertThat(loaded.getEntries().get(2)).isInstanceOf(AssistantProfileTranscriptEntry.class);
+            AssistantProfileTranscriptEntry profileEntry =
+                (AssistantProfileTranscriptEntry) loaded.getEntries().get(2);
+            assertThat(profileEntry.getProfileId()).isEqualTo("profile-a");
+            assertThat(profileEntry.getProfileName()).isEqualTo("A sayer");
+            assertThat(profileEntry.containsProfileDefinition()).isTrue();
+        } finally {
+            deleteRecursively(tempDir);
+        }
+    }
+
+    private static void deleteRecursively(Path root) throws IOException {
+        if (root == null) {
+            return;
+        }
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.deleteIfExists(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.deleteIfExists(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+}
