@@ -36,6 +36,13 @@
 	  />
   
 	  <Toolbar :vue-flow="vueFlow" />
+
+	  <AiPanel
+		:map-id="store.currentMap?.mapId"
+		:selected-node-id="selectedNodeId"
+		@refresh-map="store.loadMap"
+		@focus-node="focusNode"
+	  />
 	</div>
   </template>
   
@@ -49,6 +56,7 @@
   import NodeEditPanel from './NodeEditPanel.vue'
   import Toolbar from './Toolbar.vue'
   import ActionModal from './ActionModal.vue'
+  import AiPanel from './ai/AiPanel.vue'
   import { treeToFlow } from '@/utils/treeToFlow'
   
   const store = useMapStore()
@@ -56,6 +64,7 @@
   
   const nodes = ref<Node[]>([])
   const edges = ref<Edge[]>([])
+  const selectedNodeId = ref<string>('')
   
   const editPanel = ref({ visible: false, nodeId: '', text: '' })
   
@@ -83,6 +92,11 @@
 	// 强制刷新布局
 	await nextTick()
 	vueFlow.fitView({ padding: 0.15, duration: 200 })
+  }
+  
+  const updateSelectedNodeId = () => {
+	const selected = vueFlow.nodes.value.find((n: any) => n.selected)
+	selectedNodeId.value = selected?.id || ''
   }
   
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -161,6 +175,13 @@
   })
   
   watch(() => store.currentMap, updateFlow, { deep: true })
+  watch(() => vueFlow.nodes.value.map((n: any) => ({ id: n.id, selected: n.selected })), updateSelectedNodeId, { deep: true })
+  
+  const focusNode = (nodeId: string) => {
+	const target = vueFlow.findNode(nodeId)
+	if (!target) return
+	vueFlow.setCenter(target.position.x, target.position.y, { zoom: 1.2, duration: 300 })
+  }
   </script>
   
   <style scoped>
