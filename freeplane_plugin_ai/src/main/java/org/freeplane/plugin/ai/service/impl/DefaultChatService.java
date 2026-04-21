@@ -125,7 +125,9 @@ public class DefaultChatService implements AIService {
     private boolean isProviderConfigured(AIProviderConfiguration configuration) {
         return isNonEmpty(configuration.getOpenRouterKey())
             || isNonEmpty(configuration.getGeminiKey())
-            || configuration.hasOllamaServiceAddress();
+            || configuration.hasOllamaServiceAddress()
+            || configuration.hasDashScopeKey()
+            || configuration.hasErnieKey();
     }
 
     private boolean isNonEmpty(String value) {

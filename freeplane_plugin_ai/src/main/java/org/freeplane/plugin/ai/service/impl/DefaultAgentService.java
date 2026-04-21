@@ -23,6 +23,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class DefaultAgentService implements AIService {
+    private static final String SERVICE_NOT_INITIALIZED_MESSAGE =
+        "AI service not initialized. Please configure AI provider in preferences.";
 
     private static volatile AIChatService agentService;
     private static volatile AIToolSet toolSet;
@@ -75,6 +77,9 @@ public class DefaultAgentService implements AIService {
 
         try {
             ensureAgentInitialized();
+            if (agentService == null) {
+                return AIServiceResponse.error(SERVICE_NOT_INITIALIZED_MESSAGE);
+            }
 
             String prompt = buildMindMapPrompt(topic, request);
             String result = agentService.chat(prompt);
@@ -104,6 +109,9 @@ public class DefaultAgentService implements AIService {
 
         try {
             ensureAgentInitialized();
+            if (agentService == null) {
+                return AIServiceResponse.error(SERVICE_NOT_INITIALIZED_MESSAGE);
+            }
 
             String mapId = (String) request.get("mapId");
             Integer depth = (Integer) request.get("depth");
@@ -137,6 +145,9 @@ public class DefaultAgentService implements AIService {
 
         try {
             ensureAgentInitialized();
+            if (agentService == null) {
+                return AIServiceResponse.error(SERVICE_NOT_INITIALIZED_MESSAGE);
+            }
 
             String mapId = (String) request.get("mapId");
             Integer maxWords = (Integer) request.get("maxWords");
@@ -170,6 +181,9 @@ public class DefaultAgentService implements AIService {
 
         try {
             ensureAgentInitialized();
+            if (agentService == null) {
+                return AIServiceResponse.error(SERVICE_NOT_INITIALIZED_MESSAGE);
+            }
 
             String mapId = (String) request.get("mapId");
             String prompt = buildTagPrompt(nodeIds, mapId);
@@ -246,7 +260,9 @@ public class DefaultAgentService implements AIService {
     private boolean isProviderConfigured(AIProviderConfiguration configuration) {
         return isNonEmpty(configuration.getOpenRouterKey())
             || isNonEmpty(configuration.getGeminiKey())
-            || configuration.hasOllamaServiceAddress();
+            || configuration.hasOllamaServiceAddress()
+            || configuration.hasDashScopeKey()
+            || configuration.hasErnieKey();
     }
 
     private boolean isNonEmpty(String value) {
