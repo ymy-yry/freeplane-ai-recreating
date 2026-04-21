@@ -55,11 +55,12 @@ export function aiChat(data: {
 export function aiChatStream(data: {
   message: string
   modelSelection?: string
-  nodeId?: string
   onChunk: (chunk: string) => void
 }) {
-  // TODO: 实现 Server-Sent Events (SSE)
-  throw new Error('流式对话暂未实现')
+  // 兼容预留：若后端实现 SSE，可在这里启用真正的流式输出。
+  // 当前项目的前端“逐字显示”由 store 的模拟打字效果实现，不依赖后端流式。
+  void data
+  throw new Error('后端未提供流式接口：请使用非流式 + 前端逐字显示')
 }
 
 // ==================== 节点扩展 ====================
