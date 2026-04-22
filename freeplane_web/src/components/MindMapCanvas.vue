@@ -11,6 +11,8 @@
 		:edges-updatable="false"
 		:connection-line-style="{ stroke: '#666', strokeWidth: 2 }"
 		:default-edge-options="{ type: 'bezier' }"
+		@node-context-menu="handleNodeContextMenu"
+		@pane-click="hideContextMenu"
 	  >
 		<Background variant="dots" />
 		<Controls />
@@ -37,29 +39,43 @@
   
 	  <Toolbar :vue-flow="vueFlow" />
 
-	  <AiPanel
-		:map-id="store.currentMap?.mapId"
-		:selected-node-id="selectedNodeId"
-		@refresh-map="store.loadMap"
-		@focus-node="focusNode"
+	  <AiAutoPanel :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
+	  <AiChatPanel :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
+	  <AiBuildPanel :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
+	  <NodeContextMenu
+		:visible="contextMenu.visible"
+		:x="contextMenu.x"
+		:y="contextMenu.y"
+		:node-id="contextMenu.nodeId"
+		@close="hideContextMenu"
+		@ai-expand="handleAIExpand"
+		@ai-summarize="handleAISummarize"
+		@edit="openEditFromContext"
+		@create-child="openCreateChildFromContext"
+		@delete="deleteFromContext"
 	  />
 	</div>
   </template>
   
   <script setup lang="ts">
-  import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+  import { ref, onMounted, onUnmounted, watch, nextTick, provide } from 'vue'
   import { VueFlow, useVueFlow, type Node, type Edge } from '@vue-flow/core'
   import { Background } from '@vue-flow/background'
   import { Controls } from '@vue-flow/controls'
   
   import { useMapStore } from '@/stores/mapStore'
+  import { useAIStore } from '@/stores/aiStore'
   import NodeEditPanel from './NodeEditPanel.vue'
   import Toolbar from './Toolbar.vue'
   import ActionModal from './ActionModal.vue'
-  import AiPanel from './ai/AiPanel.vue'
+  import AiAutoPanel from './ai/AiAutoPanel.vue'
+  import AiChatPanel from './ai/AiChatPanel.vue'
+  import AiBuildPanel from './ai/AiBuildPanel.vue'
+  import NodeContextMenu from './NodeContextMenu.vue'
   import { treeToFlow } from '@/utils/treeToFlow'
   
   const store = useMapStore()
+  const aiStore = useAIStore()
   const vueFlow = useVueFlow()
   
   const nodes = ref<Node[]>([])
@@ -73,6 +89,13 @@
 	title: '',
 	mode: 'choose' as 'choose' | 'input' | 'delete',
 	targetNodeId: '' as string
+  })
+
+  const contextMenu = ref({
+	visible: false,
+	x: 0,
+	y: 0,
+	nodeId: ''
   })
   
   // **加强版更新**：每次都生成全新 nodes/edges 数组 + 强制 fitView
@@ -166,12 +189,15 @@
   onMounted(() => {
 	store.loadMap()
 	store.startPolling()
+	aiStore.init()
 	window.addEventListener('keydown', handleKeyDown)
+	window.addEventListener('click', hideContextMenu)
   })
   
   onUnmounted(() => {
 	store.stopPolling()
 	window.removeEventListener('keydown', handleKeyDown)
+	window.removeEventListener('click', hideContextMenu)
   })
   
   watch(() => store.currentMap, updateFlow, { deep: true })
@@ -181,6 +207,47 @@
 	const target = vueFlow.findNode(nodeId)
 	if (!target) return
 	vueFlow.setCenter(target.position.x, target.position.y, { zoom: 1.2, duration: 300 })
+  }
+
+  provide('selectedNodeId', selectedNodeId)
+
+  const handleNodeContextMenu = (event: any) => {
+	if (!event?.event || !event?.node) return
+	event.event.preventDefault()
+	contextMenu.value = {
+	  visible: true,
+	  x: event.event.clientX,
+	  y: event.event.clientY,
+	  nodeId: event.node.id
+	}
+  }
+
+  const hideContextMenu = () => {
+	contextMenu.value.visible = false
+  }
+
+  const handleAIExpand = async (nodeId: string) => {
+	await aiStore.expandNode({ mapId: store.currentMap?.mapId, nodeId })
+  }
+
+  const handleAISummarize = async (nodeId: string) => {
+	await aiStore.summarize({ mapId: store.currentMap?.mapId, nodeId, writeToNote: true })
+  }
+
+  const openEditFromContext = (nodeId: string) => {
+	const node = vueFlow.findNode(nodeId)
+	editPanel.value = { visible: true, nodeId, text: (node?.data as any)?.label || '' }
+	hideContextMenu()
+  }
+
+  const openCreateChildFromContext = (nodeId: string) => {
+	actionModal.value = { visible: true, title: '新建子节点', mode: 'input', targetNodeId: nodeId }
+	hideContextMenu()
+  }
+
+  const deleteFromContext = (nodeId: string) => {
+	void store.deleteNode(nodeId)
+	hideContextMenu()
   }
   </script>
   

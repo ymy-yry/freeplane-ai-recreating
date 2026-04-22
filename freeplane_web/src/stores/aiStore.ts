@@ -5,7 +5,8 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { AIModel, ChatMessage } from '@/types/ai'
+import { useMapStore } from '@/stores/mapStore'
+import type { AIModel, ChatMessage, AiMode, ServiceType, SaveModelConfigPayload } from '@/types/ai'
 import * as aiApi from '@/api/aiApi'
 
 export const useAIStore = defineStore('ai', () => {
@@ -28,9 +29,26 @@ export const useAIStore = defineStore('ai', () => {
   
   /** AI 面板是否可见 */
   const panelVisible = ref(false)
+
+  /** 当前 AI 模式：auto / chat / build */
+  const aiMode = ref<AiMode>('chat')
+
+  /** 服务路由类型 */
+  const serviceType = ref<ServiceType>('chat')
+
+  /** Build 操作独立加载状态 */
+  const buildLoading = ref(false)
+
+  /** Build 操作结果预览 */
+  const buildResult = ref('')
+  const buildResultStatus = ref<'idle' | 'loading' | 'ready'>('idle')
+
+  const panelWidth = ref(320)
   
   /** 最近一次错误信息（用于 UI 反馈） */
   const lastError = ref<string>('')
+  const lastChatFailed = ref(false)
+  const lastChatRequest = ref<{ message: string; ctx?: { mapId?: string; selectedNodeId?: string } } | null>(null)
 
   // ==================== 计算属性 ====================
   
@@ -52,6 +70,18 @@ export const useAIStore = defineStore('ai', () => {
   }
   
   const toModelSelection = (model: AIModel) => `${model.providerName}:${model.modelName}`
+
+  const setMode = (mode: AiMode) => {
+    aiMode.value = mode
+    if (mode === 'auto') serviceType.value = 'auto'
+    if (mode === 'chat') serviceType.value = 'chat'
+    if (mode === 'build') serviceType.value = 'agent'
+  }
+
+  const setPanelWidth = (width: number) => {
+    const normalized = Math.max(280, Math.min(680, Math.round(width)))
+    panelWidth.value = normalized
+  }
   
   /**
    * 获取模型列表
@@ -90,6 +120,8 @@ export const useAIStore = defineStore('ai', () => {
    */
   const sendChat = async (message: string, ctx?: { mapId?: string; selectedNodeId?: string }) => {
     if (!message.trim()) return
+    lastChatRequest.value = { message, ctx }
+    lastChatFailed.value = false
     
     // 添加用户消息
     chatHistory.value.push({
@@ -112,7 +144,8 @@ export const useAIStore = defineStore('ai', () => {
         message,
         modelSelection: currentModel.value,
         mapId: ctx?.mapId,
-        selectedNodeId: ctx?.selectedNodeId
+        selectedNodeId: ctx?.selectedNodeId,
+        serviceType: serviceType.value
       })
       
       // 更新助手回复
@@ -120,6 +153,7 @@ export const useAIStore = defineStore('ai', () => {
     } catch (error: any) {
       const msg = error?.message || '对话失败'
       lastError.value = msg
+      lastChatFailed.value = true
       chatHistory.value[assistantIndex].content = `❌ 对话失败：${msg}`
       console.error('AI 对话失败:', error)
     } finally {
@@ -133,6 +167,8 @@ export const useAIStore = defineStore('ai', () => {
    */
   const sendChatStreaming = async (message: string, ctx?: { mapId?: string; selectedNodeId?: string }) => {
     if (!message.trim()) return
+    lastChatRequest.value = { message, ctx }
+    lastChatFailed.value = false
     
     chatHistory.value.push({
       role: 'user',
@@ -153,7 +189,8 @@ export const useAIStore = defineStore('ai', () => {
         message,
         modelSelection: currentModel.value,
         mapId: ctx?.mapId,
-        selectedNodeId: ctx?.selectedNodeId
+        selectedNodeId: ctx?.selectedNodeId,
+        serviceType: serviceType.value
       })
       
       const text = response.data.reply || ''
@@ -161,6 +198,7 @@ export const useAIStore = defineStore('ai', () => {
     } catch (error: any) {
       const msg = error?.message || '对话失败'
       lastError.value = msg
+      lastChatFailed.value = true
       chatHistory.value[assistantIndex].content = `❌ 对话失败：${msg}`
       console.error('AI 对话失败:', error)
     } finally {
@@ -185,40 +223,163 @@ export const useAIStore = defineStore('ai', () => {
   
   const expandNode = async (data: { mapId?: string; nodeId: string; depth?: number; count?: number; focus?: string }) => {
     try {
-      loading.value = true
+      buildLoading.value = true
+      buildResultStatus.value = 'loading'
       lastError.value = ''
-      const res = await aiApi.expandNode(data)
+      const payload = {
+        ...data,
+        modelSelection: currentModel.value,
+        serviceType: serviceType.value
+      }
+      const res = await aiApi.expandNode(payload)
+      buildResult.value = res.data.result || res.data.summary || ''
+      buildResultStatus.value = 'ready'
+      const mapStore = useMapStore()
+      await mapStore.loadMap()
       return res.data
     } catch (error: any) {
       lastError.value = error?.message || '展开节点失败'
       throw error
     } finally {
-      loading.value = false
+      buildLoading.value = false
     }
   }
   
   const summarize = async (data: { mapId?: string; nodeId: string; maxWords?: number; writeToNote?: boolean }) => {
     try {
-      loading.value = true
+      buildLoading.value = true
+      buildResultStatus.value = 'loading'
       lastError.value = ''
-      const res = await aiApi.summarizeBranch(data)
+      const res = await aiApi.summarizeBranch({
+        ...data,
+        modelSelection: currentModel.value,
+        serviceType: serviceType.value
+      })
+      buildResult.value = res.data.summary || ''
+      buildResultStatus.value = 'ready'
+      const mapStore = useMapStore()
+      await mapStore.loadMap()
       return res.data
     } catch (error: any) {
       lastError.value = error?.message || '分支摘要失败'
       throw error
     } finally {
-      loading.value = false
+      buildLoading.value = false
     }
   }
   
   const tagNodes = async (data: { mapId?: string; nodeIds: string[] }) => {
     try {
-      loading.value = true
+      buildLoading.value = true
+      buildResultStatus.value = 'loading'
       lastError.value = ''
-      const res = await aiApi.autoTag(data)
+      const res = await aiApi.autoTag({
+        ...data,
+        modelSelection: currentModel.value,
+        serviceType: serviceType.value
+      })
+      const first = res.data.results?.[0]
+      buildResult.value = first?.result || res.data.message || ''
+      buildResultStatus.value = 'ready'
+      const mapStore = useMapStore()
+      await mapStore.loadMap()
       return res.data
     } catch (error: any) {
       lastError.value = error?.message || '自动标签失败'
+      throw error
+    } finally {
+      buildLoading.value = false
+    }
+  }
+
+  const generateMindMap = async (topic: string, options?: { maxDepth?: number }) => {
+    try {
+      buildLoading.value = true
+      buildResultStatus.value = 'loading'
+      lastError.value = ''
+      const res = await aiApi.generateMindMap({
+        topic,
+        maxDepth: options?.maxDepth,
+        modelSelection: currentModel.value,
+        serviceType: serviceType.value
+      })
+      buildResult.value = res.data.result || `已生成 ${res.data.nodeCount || 0} 个节点`
+      buildResultStatus.value = 'ready'
+      const mapStore = useMapStore()
+      await mapStore.loadMap()
+      return res.data
+    } catch (error: any) {
+      lastError.value = error?.message || '生成导图失败'
+      throw error
+    } finally {
+      buildLoading.value = false
+    }
+  }
+
+  const normalizeResultText = (text: string) => {
+    const trimmed = text.trim()
+    if (trimmed.startsWith('```')) {
+      return trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    }
+    return trimmed
+  }
+
+  const parseApplyCandidates = (text: string): string[] => {
+    const normalized = normalizeResultText(text)
+    if (!normalized) return []
+    const parsed = JSON.parse(normalized)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => (typeof item === 'string' ? item : item?.text))
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    }
+    if (Array.isArray(parsed?.children)) {
+      return parsed.children
+        .map((item: any) => (typeof item === 'string' ? item : item?.text))
+        .filter((item: any) => typeof item === 'string' && item.trim().length > 0)
+    }
+    if (typeof parsed?.result === 'string') {
+      return [parsed.result]
+    }
+    return []
+  }
+
+  const applyBuildResultToMap = async (targetNodeId: string, mapId?: string) => {
+    const mapStore = useMapStore()
+    const candidates = parseApplyCandidates(buildResult.value)
+    if (!candidates.length) {
+      throw new Error('结果中未解析到可应用的节点，请确保 AI 返回 JSON 数组或 children 结构')
+    }
+    for (const text of candidates) {
+      await mapStore.createNode(targetNodeId, text)
+    }
+    if (mapId) {
+      await mapStore.loadMap()
+    }
+  }
+
+  const retryLastChat = async () => {
+    if (!lastChatRequest.value) return
+    const { message, ctx } = lastChatRequest.value
+    await sendChatStreaming(message, ctx)
+  }
+
+  const sendSmart = async (input: string, ctx?: { mapId?: string; selectedNodeId?: string }) => {
+    if (!input.trim()) return
+    loading.value = true
+    lastError.value = ''
+    try {
+      const response = await aiApi.smartRequest({
+        input,
+        mapId: ctx?.mapId,
+        selectedNodeId: ctx?.selectedNodeId,
+        modelSelection: currentModel.value
+      })
+      const output = typeof response.data.data === 'string' ? response.data.data : JSON.stringify(response.data.data || {}, null, 2)
+      buildResult.value = output
+      return response.data
+    } catch (error: any) {
+      lastError.value = error?.message || 'Auto 模式请求失败'
       throw error
     } finally {
       loading.value = false
@@ -244,6 +405,8 @@ export const useAIStore = defineStore('ai', () => {
    */
   const clearChat = () => {
     chatHistory.value = []
+    lastChatFailed.value = false
+    lastChatRequest.value = null
   }
   
   /**
@@ -273,9 +436,15 @@ export const useAIStore = defineStore('ai', () => {
   const init = async () => {
     try {
       await fetchModelList()
+      setMode(aiMode.value)
     } catch (error) {
       console.warn('AI Store 初始化失败:', error)
     }
+  }
+
+  const saveCustomModel = async (payload: SaveModelConfigPayload) => {
+    await aiApi.saveModelConfig(payload)
+    await fetchModelList()
   }
 
   // ==================== 返回 ====================
@@ -288,7 +457,14 @@ export const useAIStore = defineStore('ai', () => {
     streaming,
     loading,
     panelVisible,
+    aiMode,
+    serviceType,
+    buildLoading,
+    buildResult,
+    buildResultStatus,
+    panelWidth,
     lastError,
+    lastChatFailed,
     
     // 计算属性
     hasConfiguredModels,
@@ -303,10 +479,17 @@ export const useAIStore = defineStore('ai', () => {
     togglePanel,
     showPanel,
     hidePanel,
+    setMode,
+    setPanelWidth,
     init,
     expandNode,
     summarize,
     tagNodes,
-    keywordSearch
+    keywordSearch,
+    generateMindMap,
+    sendSmart,
+    saveCustomModel,
+    applyBuildResultToMap,
+    retryLastChat
   }
 })

@@ -4,8 +4,8 @@
  */
 
 <template>
-  <div class="model-selector">
-    <label class="selector-label">AI 模型：</label>
+  <div class="model-selector" :class="{ compact }">
+    <label v-if="!compact" class="selector-label">AI 模型：</label>
     <select 
       v-model="selectedModel" 
       @change="handleModelChange"
@@ -23,9 +23,11 @@
         {{ model.displayName }} {{ model.isFree ? '(免费)' : '' }}
       </option>
     </select>
+
+    <button class="config-btn" type="button" @click="emit('open-config')">⚙️</button>
     
     <span v-if="!aiStore.hasConfiguredModels" class="warning">
-      ⚠️ 未配置 AI Provider，请在 Freeplane 偏好设置中配置 API Key
+      ⚠️ 未检测到已配置的 AI Provider，请先在偏好设置中配置 API Key
     </span>
   </div>
 </template>
@@ -35,6 +37,13 @@ import { computed, watch } from 'vue'
 import { useAIStore } from '@/stores/aiStore'
 
 const aiStore = useAIStore()
+const props = withDefaults(defineProps<{ compact?: boolean }>(), {
+  compact: false
+})
+const compact = props.compact
+const emit = defineEmits<{
+  (e: 'open-config'): void
+}>()
 
 const selectedModel = computed({
   get: () => aiStore.currentModel,
@@ -61,6 +70,10 @@ watch(() => aiStore.modelList.length, (newLength) => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.model-selector.compact .model-select {
+  min-width: 160px;
 }
 
 .selector-label {
@@ -98,5 +111,14 @@ watch(() => aiStore.modelList.length, (newLength) => {
   font-size: 12px;
   color: #ff9800;
   white-space: nowrap;
+}
+
+.config-btn {
+  border: 1px solid #d0d7de;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  height: 32px;
+  width: 32px;
 }
 </style>

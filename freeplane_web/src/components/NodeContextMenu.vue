@@ -16,6 +16,9 @@
 	  <div class="menu-item ai-item" @click="handleAIExpand">
 		🤖 AI 展开节点
 	  </div>
+	  <div class="menu-item ai-item" @click="handleAISummarize">
+		📝 AI 分支摘要
+	  </div>
 	  <div class="divider"></div>
 	  <div class="menu-item" @click="emit('close')">
 		❌ 关闭
@@ -35,6 +38,8 @@
 	(e: 'edit', nodeId: string): void
 	(e: 'create-child', nodeId: string): void
 	(e: 'delete', nodeId: string): void
+	(e: 'ai-expand', nodeId: string): void
+	(e: 'ai-summarize', nodeId: string): void
 	(e: 'close'): void
   }>()
   
@@ -51,8 +56,12 @@
   }
   
   const handleAIExpand = () => {
-	console.log('[AI 展开] 节点ID:', props.nodeId)
-	// 成员C后续可在此处扩展 AI 功能
+	emit('ai-expand', props.nodeId)
+	emit('close')
+  }
+
+  const handleAISummarize = () => {
+	emit('ai-summarize', props.nodeId)
 	emit('close')
   }
   </script>
