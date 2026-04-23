@@ -672,7 +672,9 @@ public class AIChatPanel extends JPanel {
     private boolean isProviderConfigured() {
         return isNonEmptyText(configuration.getOpenRouterKey())
             || isNonEmptyText(configuration.getGeminiKey())
-            || configuration.hasOllamaServiceAddress();
+            || configuration.hasOllamaServiceAddress()
+            || configuration.hasErnieKey()
+            || configuration.hasDashScopeKey();
     }
 
     private boolean isNonEmptyText(String value) {

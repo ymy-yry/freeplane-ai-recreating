@@ -25,12 +25,13 @@ import java.io.IOException;
  *   POST /api/nodes/create          → NodeRestController.handleCreate
  *   POST /api/nodes/edit            → NodeRestController.handleEdit
  *   POST /api/nodes/delete          → NodeRestController.handleDelete
- *   GET  /api/ai/models             → AiRestController.handleGetModels
- *   POST /api/ai/chat               → AiRestController.handleChat
- *   POST /api/ai/expand-node        → AiRestController.handleExpandNode
- *   POST /api/ai/summarize          → AiRestController.handleSummarize
- *   POST /api/ai/tag                → AiRestController.handleTag
- *   POST /api/ai/smart              → AiRestController.handleSmartRequest
+ *   GET  /api/ai/chat/models        → AiRestController.handleGetModels
+ *   POST /api/ai/chat/message       → AiRestController.handleChat
+ *   POST /api/ai/chat/smart         → AiRestController.handleSmartRequest
+ *   POST /api/ai/build/expand-node  → AiRestController.handleExpandNode
+ *   POST /api/ai/build/summarize    → AiRestController.handleSummarize
+ *   POST /api/ai/build/generate-mindmap → AiRestController.handleGenerateMindMap
+ *   POST /api/ai/build/tag          → AiRestController.handleTag
  */
 public class RestApiRouter {
 
@@ -169,27 +170,27 @@ public class RestApiRouter {
                     return;
                 }
 
-                if ("GET".equalsIgnoreCase(method) && "/api/ai/models".equals(path)) {
+                if ("GET".equalsIgnoreCase(method) && "/api/ai/chat/models".equals(path)) {
                     aiController.handleGetModels(exchange);
                 } else if ("POST".equalsIgnoreCase(method)) {
                     switch (path) {
-                        case "/api/ai/chat":
+                        case "/api/ai/chat/message":
                             aiController.handleChat(exchange);
                             break;
-                        case "/api/ai/generate-mindmap":
+                        case "/api/ai/chat/smart":
+                            aiController.handleSmartRequest(exchange);
+                            break;
+                        case "/api/ai/build/generate-mindmap":
                             aiController.handleGenerateMindMap(exchange);
                             break;
-                        case "/api/ai/expand-node":
+                        case "/api/ai/build/expand-node":
                             aiController.handleExpandNode(exchange);
                             break;
-                        case "/api/ai/summarize":
+                        case "/api/ai/build/summarize":
                             aiController.handleSummarize(exchange);
                             break;
-                        case "/api/ai/tag":
+                        case "/api/ai/build/tag":
                             aiController.handleTag(exchange);
-                            break;
-                        case "/api/ai/smart":
-                            aiController.handleSmartRequest(exchange);
                             break;
                         default:
                             sendNotFound(exchange);

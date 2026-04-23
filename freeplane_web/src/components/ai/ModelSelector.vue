@@ -17,8 +17,8 @@
       </option>
       <option 
         v-for="model in aiStore.modelList" 
-        :key="model.modelName"
-        :value="model.modelName"
+        :key="model.providerName + ':' + model.modelName"
+        :value="model.providerName + ':' + model.modelName"
       >
         {{ model.displayName }} {{ model.isFree ? '(免费)' : '' }}
       </option>
@@ -50,7 +50,8 @@ const handleModelChange = () => {
 // 监听模型列表加载
 watch(() => aiStore.modelList.length, (newLength) => {
   if (newLength > 0 && !aiStore.currentModel) {
-    aiStore.currentModel = aiStore.modelList[0].modelName
+    const m = aiStore.modelList[0]
+    aiStore.currentModel = m.providerName + ':' + m.modelName
   }
 })
 </script>

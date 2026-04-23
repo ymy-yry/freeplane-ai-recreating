@@ -14,12 +14,14 @@
 
 | 功能 | 接口 | 优先级 | 说明 |
 |------|------|--------|------|
-| AI 对话 | POST /api/ai/chat | 🔴 P0 | 流式对话，Markdown 渲染 |
-| 模型选择 | GET /api/ai/models | 🔴 P0 | 动态加载可用模型 |
-| 节点扩展 | POST /api/ai/expand-node | 🟡 P1 | AI 生成子节点 |
-| 分支摘要 | POST /api/ai/summarize | 🟡 P1 | 生成分支摘要 |
+| AI 对话 | POST /api/ai/chat/message | 🔴 P0 | 流式对话，Markdown 渲染 |
+| 模型选择 | GET /api/ai/chat/models | 🔴 P0 | 动态加载可用模型 |
+| 节点扩展 | POST /api/ai/build/expand-node | 🟡 P1 | AI 生成子节点 |
+| 分支摘要 | POST /api/ai/build/summarize | 🟡 P1 | 生成分支摘要 |
 | 语义搜索 | POST /api/nodes/search | 🟡 P1 | 关键词搜索节点 |
-| 智能缓冲层 | POST /api/ai/smart | 🟢 P2 | 自然语言理解 |
+| 智能缓冲层 | POST /api/ai/chat/smart | 🟢 P2 | 自然语言理解 |
+| 生成思维导图 | POST /api/ai/build/generate-mindmap | 🟡 P1 | AI 一键生成思维导图 |
+| 自动标签 | POST /api/ai/build/tag | 🟢 P2 | AI 自动生成标签 |
 
 ---
 

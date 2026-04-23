@@ -11,6 +11,9 @@ import org.freeplane.plugin.ai.buffer.BufferRequest;
 import org.freeplane.plugin.ai.buffer.BufferResponse;
 import org.freeplane.plugin.ai.chat.AIChatPanel;
 import org.freeplane.plugin.ai.maps.AvailableMaps;
+import org.freeplane.plugin.ai.service.AIService;
+import org.freeplane.plugin.ai.service.AIServiceLoader;
+import org.freeplane.plugin.ai.service.AIServiceResponse;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,9 +27,17 @@ import java.util.Map;
 /**
  * AI 相关接口控制器。
  * 负责处理 /api/ai/* 路径下的请求，包括：
- * - 获取可用模型列表
- * - AI 对话（委托给 AIChatPanel 的现有实现）
- * - 节点展开、摘要、标签等 AI 工具（第一周暂为 stub，由成员D后续实现）
+ * 
+ * Chat区（/api/ai/chat/）：
+ * - GET /api/ai/chat/models - 获取可用模型列表
+ * - POST /api/ai/chat/message - AI对话
+ * - POST /api/ai/chat/smart - 智能缓冲层
+ * 
+ * Build区（/api/ai/build/）：
+ * - POST /api/ai/build/expand-node - 节点扩展
+ * - POST /api/ai/build/summarize - 分支摘要
+ * - POST /api/ai/build/generate-mindmap - 生成思维导图
+ * - POST /api/ai/build/tag - 自动标签
  */
 public class AiRestController {
 
@@ -43,7 +54,7 @@ public class AiRestController {
     }
 
     /**
-     * GET /api/ai/models
+     * GET /api/ai/chat/models
      * 返回当前配置下可用的 AI 模型列表（动态从 AIChatPanel 获取）。
      * 数据来源与 Swing 面板中的模型选择器保持一致。
      */
@@ -111,8 +122,8 @@ public class AiRestController {
     }
 
     /**
-     * POST /api/ai/chat
-     * AI 对话接口（第二周接入实际 AIChatService）。
+     * POST /api/ai/chat/message
+     * AI 对话接口（使用AIService架构）。
      */
     public void handleChat(HttpExchange exchange) throws IOException {
         CorsFilter.addCorsHeaders(exchange);
@@ -130,16 +141,27 @@ public class AiRestController {
                 return;
             }
     
-            // 接入实际的 AIChatService
-            String reply = executeChat(message, modelSelection);
+            // 构建请求参数
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("serviceType", "chat");
+            request.put("message", message);
+            request.put("modelSelection", modelSelection);
+            request.put("mapId", mapId);
+            request.put("selectedNodeId", selectedNodeId);
     
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("reply", reply);
-            Map<String, Integer> tokenUsage = new LinkedHashMap<>();
-            tokenUsage.put("inputTokens", 0);
-            tokenUsage.put("outputTokens", reply.length());
-            response.put("tokenUsage", tokenUsage);
-            sendJson(exchange, 200, response);
+            // 使用AIService处理请求
+            AIService service = AIServiceLoader.selectService(request);
+            if (service == null) {
+                sendError(exchange, 500, "No chat service available");
+                return;
+            }
+    
+            AIServiceResponse serviceResponse = service.processRequest(request);
+            if (serviceResponse.isSuccess()) {
+                sendJson(exchange, 200, serviceResponse.getData());
+            } else {
+                sendError(exchange, 500, serviceResponse.getErrorMessage());
+            }
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleChat error", e);
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
@@ -147,8 +169,8 @@ public class AiRestController {
     }
     
     /**
-     * POST /api/ai/generate-mindmap
-     * AI 一键生成思维导图（第二周新增）。
+     * POST /api/ai/build/generate-mindmap
+     * AI 一键生成思维导图（使用AIService架构）。
      */
     public void handleGenerateMindMap(HttpExchange exchange) throws IOException {
         CorsFilter.addCorsHeaders(exchange);
@@ -165,25 +187,27 @@ public class AiRestController {
                 return;
             }
     
-            MapModel mapModel = availableMaps.getCurrentMapModel();
-            if (mapModel == null) {
-                sendError(exchange, 404, "No map is currently open");
+            // 构建请求参数
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("serviceType", "agent");
+            request.put("action", "generate-mindmap");
+            request.put("topic", topic);
+            request.put("modelSelection", modelSelection);
+            request.put("maxDepth", maxDepth);
+    
+            // 使用AIService处理请求
+            AIService service = AIServiceLoader.selectService(request);
+            if (service == null) {
+                sendError(exchange, 500, "No agent service available");
                 return;
             }
     
-            // 调用 AI 生成思维导图结构
-            String prompt = buildMindMapPrompt(topic, maxDepth);
-            String aiResponse = executeChat(prompt, modelSelection);
-    
-            // 解析 AI 返回的 JSON 并创建节点
-            int nodeCount = createMindMapFromAIResponse(mapModel, aiResponse, topic);
-    
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("success", true);
-            response.put("topic", topic);
-            response.put("nodeCount", nodeCount);
-            response.put("mapId", availableMaps.getCurrentMapIdentifier().toString());
-            sendJson(exchange, 200, response);
+            AIServiceResponse serviceResponse = service.processRequest(request);
+            if (serviceResponse.isSuccess()) {
+                sendJson(exchange, 200, serviceResponse.getData());
+            } else {
+                sendError(exchange, 500, serviceResponse.getErrorMessage());
+            }
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleGenerateMindMap error", e);
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
@@ -191,8 +215,8 @@ public class AiRestController {
     }
 
     /**
-     * POST /api/ai/expand-node
-     * AI 展开节点 stub。成员D实现 ExpandNodeTool 后替换此处逻辑。
+     * POST /api/ai/build/expand-node
+     * AI 展开节点（使用AIService架构）。
      */
     public void handleExpandNode(HttpExchange exchange) throws IOException {
         CorsFilter.addCorsHeaders(exchange);
@@ -211,12 +235,29 @@ public class AiRestController {
                 return;
             }
 
-            // Stub：接口路径已通，具体逻辑待成员D实现 ExpandNodeTool 后接入
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("nodeId", nodeId);
-            response.put("createdNodes", new ArrayList<>());
-            response.put("summary", "[stub] expand-node 接口已就绪，待成员D接入 ExpandNodeTool");
-            sendJson(exchange, 200, response);
+            // 构建请求参数
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("serviceType", "agent");
+            request.put("action", "expand-node");
+            request.put("nodeId", nodeId);
+            request.put("mapId", mapId);
+            request.put("depth", depth);
+            request.put("count", count);
+            request.put("focus", focus);
+
+            // 使用AIService处理请求
+            AIService service = AIServiceLoader.selectService(request);
+            if (service == null) {
+                sendError(exchange, 500, "No agent service available");
+                return;
+            }
+
+            AIServiceResponse serviceResponse = service.processRequest(request);
+            if (serviceResponse.isSuccess()) {
+                sendJson(exchange, 200, serviceResponse.getData());
+            } else {
+                sendError(exchange, 500, serviceResponse.getErrorMessage());
+            }
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleExpandNode error", e);
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
@@ -224,8 +265,8 @@ public class AiRestController {
     }
 
     /**
-     * POST /api/ai/summarize
-     * 分支摘要 stub。成员D实现 SummarizeBranchTool 后替换。
+     * POST /api/ai/build/summarize
+     * 分支摘要（使用AIService架构）。
      */
     public void handleSummarize(HttpExchange exchange) throws IOException {
         CorsFilter.addCorsHeaders(exchange);
@@ -238,11 +279,33 @@ public class AiRestController {
             Integer maxWords = body.get("maxWords") instanceof Number ? ((Number) body.get("maxWords")).intValue() : null; // 非必须
             boolean writeToNote = Boolean.TRUE.equals(body.get("writeToNote")); // 非必须
 
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("nodeId", nodeId);
-            response.put("summary", "[stub] summarize 接口已就绪，待成员D接入 SummarizeBranchTool");
-            response.put("wordCount", 0);
-            sendJson(exchange, 200, response);
+            if (nodeId == null) {
+                sendError(exchange, 400, "nodeId is required");
+                return;
+            }
+
+            // 构建请求参数
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("serviceType", "agent");
+            request.put("action", "summarize");
+            request.put("nodeId", nodeId);
+            request.put("mapId", mapId);
+            request.put("maxWords", maxWords);
+            request.put("writeToNote", writeToNote);
+
+            // 使用AIService处理请求
+            AIService service = AIServiceLoader.selectService(request);
+            if (service == null) {
+                sendError(exchange, 500, "No agent service available");
+                return;
+            }
+
+            AIServiceResponse serviceResponse = service.processRequest(request);
+            if (serviceResponse.isSuccess()) {
+                sendJson(exchange, 200, serviceResponse.getData());
+            } else {
+                sendError(exchange, 500, serviceResponse.getErrorMessage());
+            }
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleSummarize error", e);
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
@@ -250,8 +313,8 @@ public class AiRestController {
     }
 
     /**
-     * POST /api/ai/tag
-     * 自动关键词标签 stub。成员Ｄ实现 AutoTagNodesTool 后替换。
+     * POST /api/ai/build/tag
+     * 自动关键词标签（使用AIService架构）。
      */
     public void handleTag(HttpExchange exchange) throws IOException {
         CorsFilter.addCorsHeaders(exchange);
@@ -268,10 +331,26 @@ public class AiRestController {
                 return;
             }
     
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("results", new ArrayList<>());
-            response.put("message", "[stub] tag 接口已就绪，待成员Ｄ接入 AutoTagNodesTool");
-            sendJson(exchange, 200, response);
+            // 构建请求参数
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("serviceType", "agent");
+            request.put("action", "tag");
+            request.put("mapId", mapId);
+            request.put("nodeIds", nodeIds);
+    
+            // 使用AIService处理请求
+            AIService service = AIServiceLoader.selectService(request);
+            if (service == null) {
+                sendError(exchange, 500, "No agent service available");
+                return;
+            }
+    
+            AIServiceResponse serviceResponse = service.processRequest(request);
+            if (serviceResponse.isSuccess()) {
+                sendJson(exchange, 200, serviceResponse.getData());
+            } else {
+                sendError(exchange, 500, serviceResponse.getErrorMessage());
+            }
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleTag error", e);
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
@@ -279,7 +358,7 @@ public class AiRestController {
     }
     
     /**
-     * POST /api/ai/smart
+     * POST /api/ai/chat/smart
      * 智能缓冲层接口。用户输入自然语言，系统自动理解、优化、选择模型并返回结果。
      */
     public void handleSmartRequest(HttpExchange exchange) throws IOException {
@@ -297,27 +376,52 @@ public class AiRestController {
     
             LogUtils.info("AiRestController.handleSmartRequest: received input - " + input);
     
-            // 创建缓冲层请求
-            BufferRequest request = new BufferRequest(input);
+            // 构建请求参数
+            Map<String, Object> request = new LinkedHashMap<>();
+            request.put("input", input);
     
-            // 委托给缓冲层路由器处理
-            BufferResponse response = bufferLayerRouter.processRequest(request);
-    
-            // 构建 HTTP 响应
-            Map<String, Object> responseBody = new LinkedHashMap<>();
-            responseBody.put("success", response.isSuccess());
-            responseBody.put("usedModel", response.getUsedModel());
-            responseBody.put("qualityScore", response.getQualityScore());
-            responseBody.put("bufferLayer", "MindMapBufferLayer");
-            responseBody.put("processingTime", response.getProcessingTime());
-            responseBody.put("logs", response.getLogs());
-    
-            if (response.isSuccess()) {
-                responseBody.put("data", response.getData());
-                sendJson(exchange, 200, responseBody);
-            } else {
-                responseBody.put("errorMessage", response.getErrorMessage());
-                sendJson(exchange, 500, responseBody);
+            // 先尝试使用缓冲层处理
+            try {
+                // 创建缓冲层请求
+                BufferRequest bufferRequest = new BufferRequest(input);
+                // 委托给缓冲层路由器处理
+                BufferResponse bufferResponse = bufferLayerRouter.processRequest(bufferRequest);
+                
+                // 构建 HTTP 响应
+                Map<String, Object> responseBody = new LinkedHashMap<>();
+                responseBody.put("success", bufferResponse.isSuccess());
+                responseBody.put("usedModel", bufferResponse.getUsedModel());
+                responseBody.put("qualityScore", bufferResponse.getQualityScore());
+                responseBody.put("bufferLayer", "MindMapBufferLayer");
+                responseBody.put("processingTime", bufferResponse.getProcessingTime());
+                responseBody.put("logs", bufferResponse.getLogs());
+                
+                if (bufferResponse.isSuccess()) {
+                    responseBody.put("data", bufferResponse.getData());
+                    sendJson(exchange, 200, responseBody);
+                } else {
+                    responseBody.put("errorMessage", bufferResponse.getErrorMessage());
+                    sendJson(exchange, 500, responseBody);
+                }
+            } catch (Exception e) {
+                LogUtils.warn("Buffer layer failed, falling back to AIService", e);
+                
+                // 缓冲层失败时，回退到AIService
+                request.put("serviceType", "chat");
+                request.put("message", input);
+                
+                AIService service = AIServiceLoader.selectService(request);
+                if (service == null) {
+                    sendError(exchange, 500, "No service available");
+                    return;
+                }
+                
+                AIServiceResponse serviceResponse = service.processRequest(request);
+                if (serviceResponse.isSuccess()) {
+                    sendJson(exchange, 200, serviceResponse.getData());
+                } else {
+                    sendError(exchange, 500, serviceResponse.getErrorMessage());
+                }
             }
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleSmartRequest error", e);

@@ -12,7 +12,10 @@ public class AIChatModelFactory {
     public static final String PROVIDER_NAME_OPENROUTER = "openrouter";
     public static final String PROVIDER_NAME_GEMINI = "gemini";
     public static final String PROVIDER_NAME_OLLAMA = "ollama";
+    public static final String PROVIDER_NAME_DASHSCOPE = "dashscope";
+    public static final String PROVIDER_NAME_ERNIE = "ernie";
     public static final String DEFAULT_OPENROUTER_SERVICE_ADDRESS = "https://openrouter.ai/api/v1";
+    public static final String DEFAULT_DASHSCOPE_SERVICE_ADDRESS = "https://dashscope.aliyuncs.com/api/v1";
     static final int CHAT_MODEL_MAX_RETRIES = 2;
 
     private AIChatModelFactory() {
@@ -63,6 +66,32 @@ public class AIChatModelFactory {
             }
             return builder.build();
         }
+        if (PROVIDER_NAME_DASHSCOPE.equalsIgnoreCase(providerName)) {
+            String serviceAddress = getDashScopeServiceAddress(configuration);
+            return OpenAiChatModel.builder()
+                .baseUrl(serviceAddress)
+                .apiKey(configuration.getDashScopeKey())
+                .modelName(modelName)
+                .maxRetries(CHAT_MODEL_MAX_RETRIES)
+                .build();
+        }
+        if (PROVIDER_NAME_ERNIE.equalsIgnoreCase(providerName)) {
+            String serviceAddress = configuration.getErnieServiceAddress();
+            if (serviceAddress == null || serviceAddress.isEmpty()) {
+                serviceAddress = "https://qianfan.baidubce.com/v2";
+            } else {
+                // 如果用户配置了完整路径（包含 /chat/completions），自动截断为 base URL
+                if (serviceAddress.endsWith("/chat/completions")) {
+                    serviceAddress = serviceAddress.substring(0, serviceAddress.length() - "/chat/completions".length());
+                }
+            }
+            return OpenAiChatModel.builder()
+                .baseUrl(serviceAddress)
+                .apiKey(configuration.getErnieKey())
+                .modelName(modelName)
+                .maxRetries(CHAT_MODEL_MAX_RETRIES)
+                .build();
+        }
         throw new IllegalArgumentException("Unknown provider name: " + providerName);
     }
 
@@ -76,5 +105,13 @@ public class AIChatModelFactory {
 
     private static String getOllamaServiceAddress(AIProviderConfiguration configuration) {
         return configuration.getOllamaServiceAddress();
+    }
+
+    private static String getDashScopeServiceAddress(AIProviderConfiguration configuration) {
+        String serviceAddress = configuration.getDashScopeServiceAddress();
+        if (serviceAddress == null || serviceAddress.isEmpty()) {
+            return DEFAULT_DASHSCOPE_SERVICE_ADDRESS;
+        }
+        return serviceAddress;
     }
 }

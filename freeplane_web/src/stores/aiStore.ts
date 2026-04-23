@@ -14,7 +14,7 @@ export const useAIStore = defineStore('ai', () => {
   /** 可用的 AI 模型列表 */
   const modelList = ref<AIModel[]>([])
   
-  /** 当前选中的模型 */
+  /** 当前选中的模型（格式：providerName:modelName） */
   const currentModel = ref<string>('')
   
   /** 对话历史记录 */
@@ -28,6 +28,9 @@ export const useAIStore = defineStore('ai', () => {
   
   /** AI 面板是否可见 */
   const panelVisible = ref(false)
+  
+  /** 最近一次错误信息（用于 UI 反馈） */
+  const lastError = ref<string>('')
 
   // ==================== 计算属性 ====================
   
@@ -35,11 +38,20 @@ export const useAIStore = defineStore('ai', () => {
   const hasConfiguredModels = computed(() => modelList.value.length > 0)
   
   /** 当前选中的模型对象 */
-  const currentModelObj = computed(() => 
-    modelList.value.find(m => m.modelName === currentModel.value)
-  )
+  const currentModelObj = computed(() => {
+    const [providerName, modelName] = splitModelSelection(currentModel.value)
+    return modelList.value.find(m => m.providerName === providerName && m.modelName === modelName)
+  })
 
   // ==================== 方法 ====================
+  
+  const splitModelSelection = (selection: string): [string, string] => {
+    const idx = selection.indexOf(':')
+    if (idx <= 0 || idx === selection.length - 1) return ['', selection]
+    return [selection.slice(0, idx), selection.slice(idx + 1)]
+  }
+  
+  const toModelSelection = (model: AIModel) => `${model.providerName}:${model.modelName}`
   
   /**
    * 获取模型列表
@@ -47,15 +59,17 @@ export const useAIStore = defineStore('ai', () => {
   const fetchModelList = async () => {
     try {
       loading.value = true
+      lastError.value = ''
       const response = await aiApi.getAiModels()
       modelList.value = response.data.models
       
       // 如果没有选中模型，自动选择第一个
       if (modelList.value.length > 0 && !currentModel.value) {
-        currentModel.value = modelList.value[0].modelName
+        currentModel.value = toModelSelection(modelList.value[0])
       }
     } catch (error: any) {
       console.error('获取模型列表失败:', error)
+      lastError.value = error?.message || '获取模型列表失败'
       throw error
     } finally {
       loading.value = false
@@ -65,8 +79,8 @@ export const useAIStore = defineStore('ai', () => {
   /**
    * 切换模型
    */
-  const switchModel = (modelName: string) => {
-    currentModel.value = modelName
+  const switchModel = (modelSelection: string) => {
+    currentModel.value = modelSelection
     // 可选：清空对话历史
     // chatHistory.value = []
   }
@@ -74,7 +88,7 @@ export const useAIStore = defineStore('ai', () => {
   /**
    * 发送 AI 对话
    */
-  const sendChat = async (message: string, nodeId?: string) => {
+  const sendChat = async (message: string, ctx?: { mapId?: string; selectedNodeId?: string }) => {
     if (!message.trim()) return
     
     // 添加用户消息
@@ -82,7 +96,7 @@ export const useAIStore = defineStore('ai', () => {
       role: 'user',
       content: message,
       timestamp: Date.now(),
-      nodeId
+      nodeId: ctx?.selectedNodeId
     })
     
     // 添加助手占位消息
@@ -97,16 +111,131 @@ export const useAIStore = defineStore('ai', () => {
       const response = await aiApi.aiChat({
         message,
         modelSelection: currentModel.value,
-        selectedNodeId: nodeId
+        mapId: ctx?.mapId,
+        selectedNodeId: ctx?.selectedNodeId
       })
       
       // 更新助手回复
       chatHistory.value[assistantIndex].content = response.data.reply
     } catch (error: any) {
-      chatHistory.value[assistantIndex].content = `❌ 对话失败：${error.message}`
+      const msg = error?.message || '对话失败'
+      lastError.value = msg
+      chatHistory.value[assistantIndex].content = `❌ 对话失败：${msg}`
       console.error('AI 对话失败:', error)
     } finally {
       streaming.value = false
+    }
+  }
+  
+  /**
+   * 发送 AI 对话（逐字显示）
+   * 当前实现：先请求完整回复，再模拟逐字输出（后端 SSE 上线后可替换为真正流式）。
+   */
+  const sendChatStreaming = async (message: string, ctx?: { mapId?: string; selectedNodeId?: string }) => {
+    if (!message.trim()) return
+    
+    chatHistory.value.push({
+      role: 'user',
+      content: message,
+      timestamp: Date.now(),
+      nodeId: ctx?.selectedNodeId
+    })
+    
+    const assistantIndex = chatHistory.value.push({
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now()
+    }) - 1
+    
+    streaming.value = true
+    try {
+      const response = await aiApi.aiChat({
+        message,
+        modelSelection: currentModel.value,
+        mapId: ctx?.mapId,
+        selectedNodeId: ctx?.selectedNodeId
+      })
+      
+      const text = response.data.reply || ''
+      await typeOut(chatHistory.value[assistantIndex], text, 10)
+    } catch (error: any) {
+      const msg = error?.message || '对话失败'
+      lastError.value = msg
+      chatHistory.value[assistantIndex].content = `❌ 对话失败：${msg}`
+      console.error('AI 对话失败:', error)
+    } finally {
+      streaming.value = false
+    }
+  }
+  
+  const typeOut = (message: ChatMessage, fullText: string, delayMs: number) => {
+    message.content = ''
+    return new Promise<void>((resolve) => {
+      let i = 0
+      const timer = window.setInterval(() => {
+        i += 1
+        message.content = fullText.slice(0, i)
+        if (i >= fullText.length) {
+          window.clearInterval(timer)
+          resolve()
+        }
+      }, Math.max(0, delayMs))
+    })
+  }
+  
+  const expandNode = async (data: { mapId?: string; nodeId: string; depth?: number; count?: number; focus?: string }) => {
+    try {
+      loading.value = true
+      lastError.value = ''
+      const res = await aiApi.expandNode(data)
+      return res.data
+    } catch (error: any) {
+      lastError.value = error?.message || '展开节点失败'
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
+  
+  const summarize = async (data: { mapId?: string; nodeId: string; maxWords?: number; writeToNote?: boolean }) => {
+    try {
+      loading.value = true
+      lastError.value = ''
+      const res = await aiApi.summarizeBranch(data)
+      return res.data
+    } catch (error: any) {
+      lastError.value = error?.message || '分支摘要失败'
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
+  
+  const tagNodes = async (data: { mapId?: string; nodeIds: string[] }) => {
+    try {
+      loading.value = true
+      lastError.value = ''
+      const res = await aiApi.autoTag(data)
+      return res.data
+    } catch (error: any) {
+      lastError.value = error?.message || '自动标签失败'
+      throw error
+    } finally {
+      loading.value = false
+    }
+  }
+  
+  const keywordSearch = async (data: { mapId?: string; query: string; caseSensitive?: boolean }) => {
+    try {
+      loading.value = true
+      lastError.value = ''
+      const res = await aiApi.searchNodes(data)
+      return res.data
+    } catch (error: any) {
+      lastError.value = error?.message || '搜索失败'
+      throw error
+    } finally {
+      loading.value = false
     }
   }
   
@@ -159,6 +288,7 @@ export const useAIStore = defineStore('ai', () => {
     streaming,
     loading,
     panelVisible,
+    lastError,
     
     // 计算属性
     hasConfiguredModels,
@@ -168,10 +298,15 @@ export const useAIStore = defineStore('ai', () => {
     fetchModelList,
     switchModel,
     sendChat,
+    sendChatStreaming,
     clearChat,
     togglePanel,
     showPanel,
     hidePanel,
-    init
+    init,
+    expandNode,
+    summarize,
+    tagNodes,
+    keywordSearch
   }
 })

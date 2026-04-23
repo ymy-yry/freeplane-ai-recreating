@@ -47,6 +47,8 @@ public class Activator implements BundleActivator {
 	private static final String GEMINI_KEY_PROPERTY = "ai_gemini_key";
 	private static final String OLLAMA_API_KEY_PROPERTY = "ai_ollama_api_key";
 	private static final String MCP_TOKEN_PROPERTY = "ai_mcp_token";
+	private static final String DASHSCOPE_KEY_PROPERTY = "ai_dashscope_key";
+	private static final String ERNIE_KEY_PROPERTY = "ai_ernie_key";
 	private ModelContextProtocolServer modelContextProtocolServer;
 	private RestApiServer restApiServer;
 	private AIChatPanel aiChatPanel;
@@ -107,6 +109,8 @@ public class Activator implements BundleActivator {
 					resourceController.persistPropertyInSecretsFile(GEMINI_KEY_PROPERTY);
 					resourceController.persistPropertyInSecretsFile(OLLAMA_API_KEY_PROPERTY);
 					resourceController.persistPropertyInSecretsFile(MCP_TOKEN_PROPERTY);
+					resourceController.persistPropertyInSecretsFile(DASHSCOPE_KEY_PROPERTY);
+					resourceController.persistPropertyInSecretsFile(ERNIE_KEY_PROPERTY);
 				}
 
 				private void setSystemMessageDefault(ResourceController resourceController) {

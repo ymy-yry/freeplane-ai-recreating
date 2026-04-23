@@ -3,6 +3,7 @@
 	  <button @click="handleFitView" title="适应画布">🔍 适应</button>
 	  <button @click="handleCenterView" title="居中导图">📍 居中</button>
 	  <button @click="handleRefresh" title="刷新导图">🔄 刷新</button>
+	  <button @click="handleToggleAI" title="AI 面板">🤖 AI</button>
 	  
 	  <div class="toolbar-divider"></div>
 	  
@@ -27,12 +28,14 @@
   import { ref } from 'vue'
   import { useMapStore } from '@/stores/mapStore'
   import { exportToMM, exportToJSON, showExportDialog } from '@/utils/exportUtils'
+  import { useAIStore } from '@/stores/aiStore'
   
   const props = defineProps<{
 	vueFlow: any
   }>()
   
   const store = useMapStore()
+  const aiStore = useAIStore()
   const searchQuery = ref('')
   
   const handleFitView = () => {
@@ -75,6 +78,10 @@
 	if (!searchQuery.value.trim()) return
 	console.log('[搜索] 关键词：', searchQuery.value)
 	searchQuery.value = ''
+  }
+  
+  const handleToggleAI = () => {
+	aiStore.togglePanel()
   }
   </script>
   

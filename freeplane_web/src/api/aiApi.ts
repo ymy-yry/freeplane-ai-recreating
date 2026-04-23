@@ -29,7 +29,7 @@ const api = axios.create({
  * 获取可用的 AI 模型列表
  */
 export function getAiModels() {
-  return api.get<{ models: AIModel[] }>('/ai/models')
+  return api.get<{ models: AIModel[] }>('/ai/chat/models')
 }
 
 // ==================== AI 对话 ====================
@@ -46,7 +46,7 @@ export function aiChat(data: {
   return api.post<{
     reply: string
     tokenUsage: TokenUsage
-  }>('/ai/chat', data)
+  }>('/ai/chat/message', data)
 }
 
 /**
@@ -55,11 +55,12 @@ export function aiChat(data: {
 export function aiChatStream(data: {
   message: string
   modelSelection?: string
-  nodeId?: string
   onChunk: (chunk: string) => void
 }) {
-  // TODO: 实现 Server-Sent Events (SSE)
-  throw new Error('流式对话暂未实现')
+  // 兼容预留：若后端实现 SSE，可在这里启用真正的流式输出。
+  // 当前项目的前端“逐字显示”由 store 的模拟打字效果实现，不依赖后端流式。
+  void data
+  throw new Error('后端未提供流式接口：请使用非流式 + 前端逐字显示')
 }
 
 // ==================== 节点扩展 ====================
@@ -74,7 +75,7 @@ export function expandNode(data: {
   depth?: number
   focus?: string
 }) {
-  return api.post<ExpandNodeResult>('/ai/expand-node', data)
+  return api.post<ExpandNodeResult>('/ai/build/expand-node', data)
 }
 
 // ==================== 分支摘要 ====================
@@ -88,7 +89,7 @@ export function summarizeBranch(data: {
   maxWords?: number
   writeToNote?: boolean
 }) {
-  return api.post<SummarizeResult>('/ai/summarize', data)
+  return api.post<SummarizeResult>('/ai/build/summarize', data)
 }
 
 // ==================== 节点搜索 ====================
@@ -119,7 +120,7 @@ export function autoTag(data: {
   return api.post<{
     results: TagResult[]
     message: string
-  }>('/ai/tag', data)
+  }>('/ai/build/tag', data)
 }
 
 // ==================== 智能缓冲层 ====================
@@ -130,7 +131,7 @@ export function autoTag(data: {
 export function smartRequest(data: {
   input: string
 }) {
-  return api.post<SmartResponse>('/ai/smart', data)
+  return api.post<SmartResponse>('/ai/chat/smart', data)
 }
 
 // ==================== 思维导图生成 ====================
@@ -148,7 +149,7 @@ export function generateMindMap(data: {
     topic: string
     nodeCount: number
     mapId: string
-  }>('/ai/generate-mindmap', data)
+  }>('/ai/build/generate-mindmap', data)
 }
 
 export default api

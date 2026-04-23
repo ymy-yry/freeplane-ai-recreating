@@ -1,517 +1,598 @@
-# Freeplane Web 前端完整优化计划
+# Freeplane Web 前端优化方案
 
-**负责人**：赵佳艺（成员B）  孙楠（成员C）
-**开始日期**：2026年4月8日  
-**文档版本**：1.0
-
----
-
-## 一、当前状态评估
-
-### 1.1 已完成功能（✅）
-
-| 功能模块 | 状态 | 说明 |
-|---------|------|------|
-| 思维导图加载 | ✅ 完成 | 轮询 + 树形转换 |
-| 节点创建 | ✅ 完成 | Tab 键 + ActionModal |
-| 节点编辑 | ✅ 完成 | 双击编辑 |
-| 节点删除 | ✅ 完成 | 二次确认 |
-| 节点折叠/展开 | ✅ 完成 | 后端同步 |
-| 基础工具栏 | ✅ 完成 | 适应、居中、刷新、搜索 |
-| 右键菜单组件 | ✅ 存在 | NodeContextMenu.vue（未集成） |
-
-### 1.2 已知问题（⚠️）
-
-| 问题 | 严重程度 | 位置 | 说明 |
-|------|---------|------|------|
-| NodeEditPanel 文本不同步 | 中 | NodeEditPanel.vue:34 | initialText 不随 props 更新 |
-| 右键菜单未集成 | 低 | MindMapCanvas.vue | NodeContextMenu 组件存在但未使用 |
-| 搜索功能未实现 | 中 | Toolbar.vue:42-46 | 只有 console.log |
-| 布局算法可能重叠 | 低 | treeToFlow.ts:7-9 | 多分支时 Y 坐标可能重叠 |
-
-### 1.3 缺失功能（❌）
-
-| 功能 | 优先级 | 预计工作量 |
-|------|--------|-----------|
-| AI 智能生成面板 | 🔴 高 | 2 天 |
-| 搜索结果高亮 | 🟡 中 | 1 天 |
-| 节点样式编辑 | 🟡 中 | 2 天 |
-| 快捷键系统 | 🟢 低 | 1 天 |
-| 导出功能 | 🟢 低 | 1 天 |
-
+**对应后端版本**: Week 3（SPI架构 + 国内模型 + Auto路由 + 缓冲层缓存）  
+**目标**: 将已有但孤立的前端 AI 代码接通后端，并围绕 Auto 模式、Chat/Build 双面板构建完整交互体系
 
 ---
 
-## 二、详细实施计划
+## 一、现状差距分析
 
-### 阶段 1：Bug 修复与体验优化
+### 1.1 后端 Week 3 实际交付能力
 
-#### Day 1：修复已知问题
+| 能力 | 端点 | 状态 |
+|---|---|---|
+| 模型列表（含DashScope/ERNIE） | `GET /api/ai/chat/models` | ✅ 真实返回 |
+| AI 对话（CHAT服务） | `POST /api/ai/chat/message` | ✅ 真实调用LangChain4j |
+| 生成思维导图 | `POST /api/ai/build/generate-mindmap` | ✅ 返回AI文字结果 |
+| 节点展开 | `POST /api/ai/build/expand-node` | ✅ 返回AI文字结果 |
+| 分支摘要 | `POST /api/ai/build/summarize` | ✅ 返回AI文字结果 |
+| 自动标签 | `POST /api/ai/build/tag` | ✅ 返回AI文字结果 |
+| 智能缓冲层（Auto模式） | `POST /api/ai/chat/smart` | ✅ 走BufferLayerRouter |
+| Auto 服务路由 | `AIServiceLoader.selectService()` | ✅ 根据action自动选CHAT/AGENT |
+| 用户偏好配置 | `UserPreferenceConfig` | ✅ 后端已支持，前端尚无入口 |
+| 性能监控数据 | `PerformanceMonitor` | ✅ 后端收集，前端尚未展示 |
 
-**任务 1.1**：修复 NodeEditPanel 文本同步问题
-- 文件：`freeplane_web/src/components/NodeEditPanel.vue`
-- 工作量：30 行修改
-- 内容：
-  ```typescript
-  // 添加 watch 监听 props 变化
-  import { watch } from 'vue'
-  
-  watch(() => props.initialText, (newVal) => {
-    editText.value = newVal
+### 1.2 前端当前问题（逐文件）
+
+| 文件 | 问题 |
+|---|---|
+| `MindMapCanvas.vue` | 未调用 `aiStore.init()`，模型列表永远为空 |
+| `MindMapCanvas.vue` | 未挂载任何 AI 面板组件 |
+| `MindMapCanvas.vue` | 未注册右键菜单事件，`NodeContextMenu` 从未被触发 |
+| `Toolbar.vue` | 无 AI 入口按钮，无 Chat/Build 模式切换 |
+| `Toolbar.vue` | 搜索只打 log，未调用 `/nodes/search` |
+| `NodeContextMenu.vue` | "AI展开节点"只打 log，未调用接口 |
+| `components/ai/ModelSelector.vue` | 已完整实现，但**从未被任何页面引用** |
+| `aiStore.ts` | 缺少 `aiMode`、`buildLoading`、Build 操作方法 |
+| `types/ai.ts` | `ExpandNodeResult`/`SummarizeResult`/`TagResult` 与后端实际响应不符 |
+| `aiApi.ts` | `expandNode`/`summarizeBranch`/`autoTag` 泛型类型与后端实际不符 |
+| 整体 | 无 Auto 模式入口，无 Chat 对话面板，无 Build 操作面板 |
+
+---
+
+## 二、改动文件总览
+
+| 改动类型 | 文件路径 | 主要内容 |
+|---|---|---|
+| 修改 | `src/types/ai.ts` | 修正 Build 操作返回类型；新增 AiMode/ServiceType 类型 |
+| 修改 | `src/api/aiApi.ts` | 修正 expandNode/summarize/tag 泛型；新增 serviceType 参数说明 |
+| 修改 | `src/stores/aiStore.ts` | 新增 aiMode/buildLoading/buildResult；新增 4 个 Build 操作方法 |
+| 修改 | `src/components/Toolbar.vue` | 加 AI 按钮、Chat/Build tab、搜索接通接口 |
+| 修改 | `src/components/NodeContextMenu.vue` | AI展开/摘要菜单项接通实际调用 |
+| 修改 | `src/components/MindMapCanvas.vue` | 调用 init()、挂载面板、注册右键菜单 |
+| 新建 | `src/components/ai/AiChatPanel.vue` | Chat 对话侧边栏 |
+| 新建 | `src/components/ai/AiBuildPanel.vue` | Build 操作面板（含 Auto 模式入口） |
+| 修改 | `src/components/ai/ModelSelector.vue` | 新增 Auto 模式选项 |
+| 新建 | `src/components/ai/ModelConfigPanel.vue` | 自定义模型/API Key 配置对话框 |
+| 修改 | `src/api/aiApi.ts` | 新增 saveModelConfig 接口 |
+| 修改 | `src/stores/aiStore.ts` | 新增 saveCustomModel 方法 |
+
+---
+
+## 三、改动详述
+
+### 3.1 `src/types/ai.ts` — 修正与新增类型
+
+**问题**: `ExpandNodeResult` 含 `createdNodes[]`，但后端实际返回 `result`（AI文字）字段。
+
+**修正后的 Build 操作响应结构**（对应后端 `DefaultAgentService` 各 handler 实际返回）：
+
+```ts
+// 修正：节点展开实际响应
+export interface ExpandNodeActualResult {
+  nodeId: string
+  result: string         // AI 生成的展开内容（JSON文字）
+  tokenUsage: TokenUsage
+}
+
+// 修正：分支摘要实际响应
+export interface SummarizeActualResult {
+  nodeId: string
+  summary: string        // AI 生成的摘要文字
+  tokenUsage: TokenUsage
+}
+
+// 修正：自动标签实际响应
+export interface TagActualResult {
+  nodeIds: string[]
+  result: string         // AI 生成的标签JSON文字
+  tokenUsage: TokenUsage
+}
+
+// 新增：AI 模式枚举
+export type AiMode = 'chat' | 'build'
+
+// 新增：服务类型（对应后端 AIServiceType）
+export type ServiceType = 'auto' | 'chat' | 'agent'
+```
+
+---
+
+### 3.2 `src/api/aiApi.ts` — 修正泛型 + 新增 serviceType 说明
+
+**问题**: `expandNode` 的泛型用的是 `ExpandNodeResult`，解构时 `createdNodes` 为 undefined。
+
+**修正**：将 `expandNode`/`summarizeBranch`/`autoTag` 泛型换为修正后的类型。
+
+**新增**: 所有 Build 操作的 `serviceType` 默认值说明：
+- 未传 `serviceType` → 后端 Auto 模式自动路由
+- 传 `'agent'` → 强制走 `DefaultAgentService`
+- 传 `'chat'` → 强制走 `DefaultChatService`
+
+```ts
+// aiChat 新增 serviceType 参数，支持前端控制路由
+export function aiChat(data: {
+  message: string
+  modelSelection?: string
+  mapId?: string
+  selectedNodeId?: string
+  serviceType?: 'auto' | 'chat' | 'agent'  // 不传则后端 Auto 路由
+})
+```
+
+---
+
+### 3.3 `src/stores/aiStore.ts` — 核心状态扩展
+
+**新增状态**：
+
+```ts
+/** 当前 AI 面板模式：chat 对话 / build 操作 */
+const aiMode = ref<AiMode>('chat')
+
+/** Build 操作加载状态 */
+const buildLoading = ref(false)
+
+/** Build 操作最新结果文字（AI返回的文字，供面板展示） */
+const buildResult = ref<string>('')
+
+/** 服务类型：auto / chat / agent（控制后端路由） */
+const serviceType = ref<ServiceType>('auto')
+```
+
+**新增方法**（4个 Build 操作，完成后触发 mapStore.loadMap 刷新导图）：
+
+```ts
+/** AI 展开节点 */
+const expandNode = async (nodeId: string, options?: { count?: number; depth?: number; focus?: string })
+
+/** AI 分支摘要 */
+const summarize = async (nodeId: string, options?: { maxWords?: number; writeToNote?: boolean })
+
+/** AI 一键生成思维导图 */
+const generateMindMap = async (topic: string, options?: { maxDepth?: number })
+
+/** AI 自动打标签 */
+const autoTag = async (nodeIds: string[])
+```
+
+**修改 sendChat**：透传 `serviceType` 给后端，支持前端手动切换 Auto/Chat 模式：
+
+```ts
+const sendChat = async (message: string, nodeId?: string) => {
+  // ... 现有逻辑
+  const response = await aiApi.aiChat({
+    message,
+    modelSelection: currentModel.value,
+    selectedNodeId: nodeId,
+    serviceType: serviceType.value  // 新增：透传服务类型
   })
-  
-  watch(() => props.visible, (visible) => {
-    if (visible) {
-      editText.value = props.initialText
-      nextTick(() => textareaRef.value?.focus())
-    }
-  })
-  ```
-
-**任务 1.2**：集成右键菜单
-- 文件：`freeplane_web/src/components/MindMapCanvas.vue`
-- 工作量：+50 行
-- 内容：
-  ```vue
-  <NodeContextMenu
-    :visible="contextMenu.visible"
-    :x="contextMenu.x"
-    :y="contextMenu.y"
-    :node-id="contextMenu.nodeId"
-    @edit="handleEditFromContext"
-    @delete="handleDeleteFromContext"
-    @create-child="handleCreateChildFromContext"
-  />
-  
-  <VueFlow @node-context-menu="handleNodeContextMenu" ...>
-  ```
-
-**任务 1.3**：实现搜索节点功能
-- 文件：`freeplane_web/src/components/Toolbar.vue`
-- 工作量：+40 行
-- 内容：
-  ```typescript
-  import * as nodeApi from '@/api/nodeApi'
-  
-  const handleSearch = async () => {
-    if (!searchQuery.value.trim() || !store.currentMap) return
-    
-    const results = await nodeApi.searchNodes(
-      searchQuery.value,
-      store.currentMap.mapId
-    )
-    
-    // 高亮搜索结果
-    highlightNodes(results.results)
-  }
-  ```
-
----
-
-#### Day 2：布局算法优化
-
-**任务 2.1**：优化 treeToFlow 布局
-- 文件：`freeplane_web/src/utils/treeToFlow.ts`
-- 工作量：+80 行修改
-- 内容：
-  - 改进子树 Y 坐标计算
-  - 添加节点防重叠逻辑
-  - 支持左右对称布局
-
-**任务 2.2**：实现节点位置持久化
-- 文件：`freeplane_web/src/stores/mapStore.ts`
-- 工作量：+60 行
-- 内容：
-  ```typescript
-  // 保存节点位置
-  const nodePositions = ref<Map<string, {x: number, y: number}>>(new Map())
-  
-  const saveNodePosition = (nodeId: string, position: {x: number, y: number}) => {
-    nodePositions.value.set(nodeId, position)
-  }
-  
-  // 在 updateFlow 时恢复位置
-  ```
-
----
-
-#### Day 3：用户体验优化
-
-**任务 3.1**：添加加载状态提示
-- 文件：`freeplane_web/src/components/MindMapCanvas.vue`
-- 工作量：+40 行
-- 内容：
-  ```vue
-  <div v-if="store.loading" class="loading-overlay">
-    <div class="spinner"></div>
-    <p>加载中...</p>
-  </div>
-  ```
-
-**任务 3.2**：添加操作成功/失败提示
-- 文件：`freeplane_web/src/stores/mapStore.ts`
-- 工作量：+50 行
-- 内容：
-  ```typescript
-  import { useToast } from '@/composables/useToast'
-  
-  const createNode = async (parentId: string, text: string) => {
-    try {
-      await mapApi.createNode(...)
-      toast.success('节点创建成功')
-    } catch (e) {
-      toast.error('节点创建失败：' + e.message)
-    }
-  }
-  ```
-
-**任务 3.3**：优化轮询策略
-- 文件：`freeplane_web/src/stores/mapStore.ts`
-- 工作量：+30 行修改
-- 内容：
-  ```typescript
-  // 智能轮询：用户操作时暂停轮询
-  const isUserOperating = ref(false)
-  
-  const startPolling = () => {
-    pollingInterval = setInterval(() => {
-      if (!isUserOperating.value) {
-        loadMap()
-      }
-    }, 3000)
-  }
-  ```
-
----
-
-### 阶段 2：AI 智能缓冲层集成
-
-#### Day 4-5：AI 智能生成面板
-
-**任务 4.1**：创建 AISmartPanel 组件
-- 文件：`freeplane_web/src/components/AISmartPanel.vue`（新建）
-- 工作量：200 行
-- 功能：
-  - 自然语言输入框
-  - 一键生成按钮
-  - 处理进度展示
-  - 优化日志展示
-  - 质量评分显示
-
-**任务 4.2**：新增智能 API 调用
-- 文件：`freeplane_web/src/api/mapApi.ts`
-- 工作量：+20 行
-- 内容：
-  ```typescript
-  export const smartGenerateMindMap = async (input: string) => {
-    const res = await api.post('/ai/smart', { input })
-    return res.data
-  }
-  ```
-
-**任务 4.3**：集成到工具栏
-- 文件：`freeplane_web/src/components/Toolbar.vue`
-- 工作量：+40 行
-- 内容：
-  ```vue
-  <button @click="showAISmartPanel = true" class="ai-btn">
-    🤖 AI 智能生成
-  </button>
-  
-  <AISmartPanel
-    :visible="showAISmartPanel"
-    @generate="handleAIGenerate"
-    @close="showAISmartPanel = false"
-  />
-  ```
-
----
-
-#### Day 6：AI 功能增强
-
-**任务 5.1**：添加 AI 生成历史记录
-- 文件：`freeplane_web/src/stores/mapStore.ts`
-- 工作量：+60 行
-- 内容：
-  ```typescript
-  const aiHistory = ref<Array<{
-    input: string
-    model: string
-    quality: number
-    timestamp: number
-  }>>([])
-  
-  const addToAIHistory = (record) => {
-    aiHistory.value.unshift(record)
-  }
-  ```
-
-**任务 5.2**：实现 AI 生成结果预览
-- 文件：`freeplane_web/src/components/AISmartPanel.vue`
-- 工作量：+80 行
-- 内容：
-  - 生成前显示预估信息
-  - 生成中显示进度条
-  - 生成后显示质量评分
-
----
-
-#### Day 7：AI 交互优化
-
-**任务 6.1**：添加流式响应支持
-- 文件：`freeplane_web/src/api/mapApi.ts`
-- 工作量：+50 行
-- 内容：
-  ```typescript
-  export const smartGenerateStream = async (
-    input: string,
-    onChunk: (chunk: string) => void
-  ) => {
-    const response = await fetch('/api/ai/smart', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input, stream: true })
-    })
-    
-    const reader = response.body.getReader()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      onChunk(new TextDecoder().decode(value))
-    }
-  }
-  ```
-
-**任务 6.2**：优化错误处理
-- 文件：`freeplane_web/src/components/AISmartPanel.vue`
-- 工作量：+40 行
-- 内容：
-  - 网络错误重试
-  - 模型降级提示
-  - 友好错误信息
-
----
-
-### 阶段 3：高级功能开发
-
-#### Day 8：节点样式编辑
-
-**任务 7.1**：创建 NodeStylePanel 组件
-- 文件：`freeplane_web/src/components/NodeStylePanel.vue`（新建）
-- 工作量：150 行
-- 功能：
-  - 背景颜色选择
-  - 边框样式设置
-  - 字体大小调整
-  - 图标选择
-
-**任务 7.2**：添加样式 API
-- 文件：`freeplane_web/src/api/nodeApi.ts`
-- 工作量：+30 行
-- 内容：
-  ```typescript
-  export const updateNodeStyle = async (
-    mapId: string,
-    nodeId: string,
-    style: NodeStyle
-  ) => {
-    await api.post('/nodes/style', { mapId, nodeId, style })
-  }
-  ```
-
----
-
-#### Day 9：快捷键系统
-
-**任务 8.1**：实现快捷键管理器
-- 文件：`freeplane_web/src/utils/shortcutManager.ts`（新建）
-- 工作量：120 行
-- 内容：
-  ```typescript
-  export const shortcuts = {
-    'Tab': 'createNode',
-    'Delete': 'deleteNode',
-    'F2': 'editNode',
-    'Ctrl+F': 'search',
-    'Ctrl+Z': 'undo',
-    'Ctrl+Y': 'redo',
-    'Escape': 'closePanel'
-  }
-  ```
-
-**任务 8.2**：集成到 MindMapCanvas
-- 文件：`freeplane_web/src/components/MindMapCanvas.vue`
-- 工作量：+30 行修改
-- 内容：替换现有的 handleKeyDown
-
----
-
-#### Day 10：导出功能
-
-**任务 9.1**：添加导出菜单
-- 文件：`freeplane_web/src/components/Toolbar.vue`
-- 工作量：+50 行
-- 内容：
-  ```vue
-  <div class="dropdown">
-    <button>📥 导出</button>
-    <div class="dropdown-content">
-      <button @click="exportAsPNG">PNG 图片</button>
-      <button @click="exportAsSVG">SVG 矢量图</button>
-      <button @click="exportAsJSON">JSON 数据</button>
-      <button @click="exportAsMarkdown">Markdown</button>
-    </div>
-  </div>
-  ```
-
-**任务 9.2**：实现导出功能
-- 文件：`freeplane_web/src/utils/exportUtils.ts`（新建）
-- 工作量：100 行
-- 内容：
-  ```typescript
-  export const exportAsPNG = (nodes: Node[], edges: Edge[]) => {
-    // 使用 html2canvas 或截图 API
-  }
-  
-  export const exportAsJSON = (mapData: MindMapData) => {
-    const blob = new Blob([JSON.stringify(mapData, null, 2)], {
-      type: 'application/json'
-    })
-    downloadBlob(blob, 'mindmap.json')
-  }
-  ```
-
----
-
-### 阶段 4：性能优化与测试（2 天）
-
-#### Day 11：性能优化
-
-**任务 10.1**：优化大数据渲染
-- 文件：`freeplane_web/src/utils/treeToFlow.ts`
-- 工作量：+60 行
-- 内容：
-  - 虚拟滚动（节点 > 100 时）
-  - 按需渲染子节点
-  - Web Worker 计算布局
-
-**任务 10.2**：优化网络请求
-- 文件：`freeplane_web/src/stores/mapStore.ts`
-- 工作量：+40 行
-- 内容：
-  - 请求去重
-  - 失败重试
-  - 增量更新（只请求变化的节点）
-
----
-
-#### Day 12：测试与文档
-
-**任务 11.1**：编写组件测试
-- 文件：`freeplane_web/src/components/__tests__/`
-- 工作量：150 行
-- 内容：
-  - MindMapCanvas 测试
-  - ActionModal 测试
-  - AISmartPanel 测试
-
-**任务 11.2**：编写 E2E 测试
-- 文件：`freeplane_web/e2e/`
-- 工作量：100 行
-- 内容：
-  - 节点创建流程
-  - 折叠/展开流程
-  - AI 生成流程
-
-**任务 11.3**：更新文档
-- 文件：`freeplane_web/README.md`
-- 工作量：50 行
-- 内容：
-  - 功能列表
-  - 使用指南
-  - 开发指南
-
----
-
-## 四、文件清单
-
-### 4.1 新增文件（8个）
-
-```
-freeplane_web/src/
-├── components/
-│   ├── AISmartPanel.vue           # AI 智能生成面板（200 行）
-│   └── NodeStylePanel.vue         # 节点样式编辑（150 行）
-├── utils/
-│   ├── shortcutManager.ts         # 快捷键管理（120 行）
-│   └── exportUtils.ts             # 导出工具（100 行）
-├── composables/
-│   └── useToast.ts                # Toast 提示（50 行）
-└── components/__tests__/
-    ├── MindMapCanvas.spec.ts      # 组件测试（80 行）
-    ├── ActionModal.spec.ts        # 组件测试（40 行）
-    └── AISmartPanel.spec.ts       # 组件测试（30 行）
-```
-
-### 4.2 修改文件（7个）
-
-```
-freeplane_web/src/
-├── api/
-│   ├── mapApi.ts                  # +20 行（智能生成接口）
-│   └── nodeApi.ts                 # +30 行（样式、搜索）
-├── components/
-│   ├── MindMapCanvas.vue          # +100 行（右键菜单、加载状态）
-│   ├── NodeEditPanel.vue          # +20 行（文本同步）
-│   ├── Toolbar.vue                # +90 行（AI 按钮、导出菜单）
-│   └── ActionModal.vue            # +10 行（样式优化）
-└── stores/
-    └── mapStore.ts                # +150 行（AI 历史、Toast、优化）
+}
 ```
 
 ---
 
-## 五、验收标准
+### 3.4 `src/components/Toolbar.vue` — AI 入口与三模式切换
 
-### 5.1 功能验收
+**核心设计原则**：Auto / Chat / Build 三者是**并列互斥**的模式，不是层级关系。
 
-- [ ] 所有已知 Bug 已修复
-- [ ] AI 智能生成面板可用
-- [ ] 搜索功能正常
-- [ ] 右键菜单集成完成
-- [ ] 节点样式可编辑
-- [ ] 快捷键系统完善
-- [ ] 导出功能可用
+后端 `AIServiceType` 只有 `CHAT` 和 `AGENT` 两种服务类型，`"auto"` 是路由控制字——不传或传 `"auto"` 时后端根据 `action` 关键字自动推断走哪个服务。因此前端应将 Auto 视为第三种独立模式与 Chat、Build 并列。
 
-### 5.2 性能验收
+**新增元素**（在工具栏现有按钮右侧追加）：
 
-- [ ] 首屏加载 < 2 秒
-- [ ] 节点操作响应 < 200ms
-- [ ] 100 节点渲染流畅
-- [ ] 内存占用 < 200MB
+```
+[ 分隔线 ] [ 🤖 AI ] [ Auto | Chat | Build ]
+```
 
-### 5.3 质量验收
+- `🤖 AI` 按钮：切换 `aiStore.panelVisible`
+- `Auto | Chat | Build` 三选一 tab：绑定 `aiStore.aiMode`，仅面板展开时显示
+  - 选 **Auto** → `aiStore.aiMode='auto'`，`serviceType` 不传（后端自动路由）
+  - 选 **Chat** → `aiStore.aiMode='chat'`，`serviceType='chat'`
+  - 选 **Build** → `aiStore.aiMode='build'`，`serviceType='agent'`
 
-- [ ] TypeScript 零错误
-- [ ] ESLint 零警告
-- [ ] 测试覆盖率 > 70%
-- [ ] 无控制台错误
+**修复搜索**：`handleSearch` 改为调用 `aiApi.searchNodes`，搜索结果高亮对应节点（通过 VueFlow 的 `setCenter` 定位）。
+
+**引入 `ModelSelector`**：紧挨 AI 按钮后显示，当面板可见时展开。
 
 ---
 
-## 六、风险与应对
+### 3.5 `src/components/ai/ModelSelector.vue` — 职责说明
 
-| 风险 | 影响 | 概率 | 应对措施 |
-|------|------|------|---------|
-| AI 接口未就绪 | 高 | 中 | 使用 Mock 数据开发 |
-| 性能优化困难 | 中 | 中 | 分阶段优化，先解决瓶颈 |
-| 浏览器兼容性 | 中 | 低 | 使用 Polyfill |
-| 时间不足 | 高 | 低 | 优先核心功能 |
+`ModelSelector` 只负责选择具体**模型**（决定调用哪家 API），与 Auto/Chat/Build 模式切换是两个独立维度：
+
+- **模式** = Auto / Chat / Build（由 Toolbar tab 控制，决定路由策略）
+- **模型** = 具体使用哪个模型（由 ModelSelector 控制）
+
+两者可正交组合，例如“Auto 模式 + DashScope qwen-max 模型”。
+
+下拉列表无需新增 Auto 选项，保持原有结构：
+```
+[ OpenRouter: gpt-4o ] [ Gemini: gemini-2.0-flash ] [ DashScope: qwen-max ] [ ERNIE: ernie-4.5 ]
+```
+
+若无任何模型配置，显示警告提示。
 
 ---
 
+### 3.6 `src/components/ai/AiAutoPanel.vue`（新建）— Auto 模式面板
 
+**布局**：右侧固定 320px 侧边栏，`v-if="aiStore.panelVisible && aiStore.aiMode === 'auto'"`
 
-**计划编制**：赵佳艺（成员B）  孙楠（成员C）
-**编制日期**：2026年4月8日  
-**下次更新**：阶段 1 完成后
+```
+┌─────────────────────────────────┐
+│  ✨ Auto 智能模式               │
+│  [当前节点: node-xxx]           │
+├─────────────────────────────────┤
+│  描述你的需求，AI 自动选择最佳   │
+│  处理方式（对话 or 操作导图）    │
+├─────────────────────────────────┤
+│  ┌─────────────────────────────┐│
+│  │ 输入自然语言指令...          ││
+│  │                             ││
+│  └─────────────────── [发送] ──┘│
+├─────────────────────────────────┤
+│  示例指令：                      │
+│  · 展开这个节点，生成5个子节点   │
+│  · 帮我总结这个分支的内容       │
+│  · 这个节点讲的是什么           │
+└─────────────────────────────────┘
+```
+
+**发送逻辑**：调用 `POST /api/ai/chat/smart`（BufferLayerRouter），不传 `serviceType`，后端 Auto 路由自动判断。
+
+---
+
+### 3.7 `src/components/ai/AiChatPanel.vue`（新建）— Chat 对话面板
+
+**布局**：右侧固定 320px 侧边栏，`v-if="aiStore.panelVisible && aiStore.aiMode === 'chat'"`
+
+```
+┌─────────────────────────────────┐
+│  🤖 AI Chat  [模型选择器]  [清空] │  ← 顶部栏
+├─────────────────────────────────┤
+│                                 │
+│  ┌─────────────────────────┐   │
+│  │ 用户: 帮我分析这个节点   │   │
+│  └─────────────────────────┘   │
+│  ┌─────────────────────────┐   │
+│  │ AI:  这个节点主要涉及...  │   │
+│  └─────────────────────────┘   │
+│          ... 历史消息 ...        │  ← 消息列表（滚动区）
+│                                 │
+├─────────────────────────────────┤
+│  当前节点: [node-xxx] ℹ️         │  ← 关联节点提示
+├─────────────────────────────────┤
+│  ┌─────────────────────────┐   │
+│  │ 输入消息...  Ctrl+Enter  │   │
+│  └──────────────────────[发送]──┘  ← 输入区
+└─────────────────────────────────┘
+```
+
+**关键交互**：
+- 消息列表绑定 `aiStore.chatHistory`，assistant 消息 loading 时显示打字动画
+- 发送时自动携带当前选中节点 ID（由 MindMapCanvas 通过 provide 注入）
+- `streaming` 为 true 时发送按钮禁用
+
+---
+
+### 3.8 `src/components/ai/AiBuildPanel.vue`（新建）— Build 操作面板
+
+**布局**：同侧边栏，`v-if="aiStore.panelVisible && aiStore.aiMode === 'build'"`
+
+顶部**不再放 Auto 下拉**（模式切换已在 Toolbar tab 层完成，Build 面板始终为 agent 模式），**但保留模型选择器**（与 Chat 面板一致）。
+
+```
+┌─────────────────────────────────┐
+│  🔧 AI Build  [模型选择器]      │  ← 顶部（模型选择与Chat面板一致）
+├─────────────────────────────────┤
+│  ┌─────────── 生成思维导图 ─────┐ │
+│  │ 主题: [__________________] │ │
+│  │ 深度: [3▼]                 │ │
+│  │              [一键生成]     │ │
+│  └─────────────────────────────┘ │
+│  ┌─────────── 展开节点 ─────────┐ │
+│  │ 当前节点: node-xxx ✓         │ │
+│  │ 数量: [5▼]  方向: [_______] │ │
+│  │              [AI 展开]      │ │
+│  └─────────────────────────────┘ │
+│  ┌─────────── 分支摘要 ─────────┐ │
+│  │ 当前节点: node-xxx ✓         │ │
+│  │ 写入备注: [✓]               │ │
+│  │              [生成摘要]     │ │
+│  └─────────────────────────────┘ │
+│  ┌─────────── 自动标签 ─────────┐ │
+│  │ 当前节点: node-xxx ✓         │ │
+│  │              [批量打标签]   │ │
+│  └─────────────────────────────┘ │
+├─────────────────────────────────┤
+│  结果预览：                       │
+│  ┌─────────────────────────────┐ │
+│  │ AI 返回的文字结果...         │ │  ← buildResult 展示区
+│  └─────────────────────────────┘ │
+└─────────────────────────────────┘
+```
+
+**关键交互**：
+- 顶部模型选择器与 Chat 面板一致，绑定 `aiStore.currentModel`，切换模型后后续所有 Build 操作使用新模型
+- 展开/摘要/标签操作需要选中节点，无选中时按钮 disabled 并提示"请先选中节点"
+- 操作中显示 `buildLoading` 动画
+- 操作完成后自动调用 `mapStore.loadMap()` 刷新导图
+- 结果预览区显示 `aiStore.buildResult`（AI返回的文字内容）
+- 所有 Build 操作请求均携带 `modelSelection: aiStore.currentModel` 参数
+
+---
+
+### 3.9 `src/components/NodeContextMenu.vue` — 接通实际调用
+
+**现状**：`handleAIExpand` 只打 log
+
+**改动**（新增 AI 展开 + AI 摘要两个菜单项的真实调用）：
+
+```
+右键菜单新增/修改：
+  🤖 AI 展开节点  →  aiStore.expandNode(nodeId) + mapStore.loadMap()
+  📝 AI 分支摘要  →  aiStore.summarize(nodeId)   （新增菜单项）
+  操作中显示 loading toast，完成后提示成功
+```
+
+需同时新增 `ai-summarize` emit 事件定义。
+
+---
+
+### 3.10 `src/components/MindMapCanvas.vue` — 串联所有组件
+
+**改动清单**：
+
+1. `onMounted` 新增 `await aiStore.init()` → **修复模型列表为空的根本问题**
+
+2. 追踪选中节点 ID：
+```ts
+const selectedNodeId = ref<string>('')
+// watch VueFlow 选中状态变化
+watch(() => vueFlow.nodes.value.filter(n => n.selected), (selected) => {
+  selectedNodeId.value = selected.length > 0 ? selected[0].id : ''
+})
+// provide 给子组件
+provide('selectedNodeId', selectedNodeId)
+```
+
+3. 注册右键菜单（现有 `NodeContextMenu` 从未被挂载）：
+```ts
+// 监听 VueFlow 的 node-context-menu 事件
+// 显示 NodeContextMenu 组件，传入 x/y/nodeId
+```
+
+4. 模板引入四个 AI 组件（Auto/Chat/Build 三面板 + 右键菜单）：
+```html
+<AiAutoPanel />
+<AiChatPanel />
+<AiBuildPanel />
+<NodeContextMenu v-bind="contextMenu" @ai-expand="handleAIExpand" @ai-summarize="handleAISummarize" />
+```
+
+---
+
+### 3.11 `src/components/ai/ModelConfigPanel.vue`（新建）— 自定义模型配置对话框
+
+**入口**：ModelSelector 下拉底部 `⚙️ 添加自定义模型...` 点击触发，或 AiAutoPanel/AiChatPanel 顶部模型选择区旁的齿轮按钮。
+
+**布局（Modal 弹窗）**：
+
+```
+┌─────────────────────────────────────────┐
+| ⚙️ 配置 AI 模型                    [✕]  |
+├─────────────────────────────────────────┤
+| 预设 Provider（Tab 切换）                |
+| [ OpenRouter ] [ Gemini ] [ DashScope ] |
+| [ ERNIE ] [ Ollama ] [ 自定义 ]         |
+├─────────────────────────────────────────┤
+|                                         |
+|  Provider: [OpenRouter            ▼]    |
+|  API Key:  [••••••••••••••]  [👁️]      |
+|            获取 API Key →                |
+|  Base URL: [https://openrouter.ai/api/v1]│ (自定义时显示)
+|  模型名:   [openai/gpt-4o         ]     | (自定义时必填)
+|                                         |
+├─────────────────────────────────────────┤
+| ❌ 错误信息（若有）                      |
+|              [取消]  [保存并刷新]        |
+└─────────────────────────────────────────┘
+```
+
+**预设 Provider 配置规则**：
+
+| Provider | API Key 配置项 | Base URL（默认值） | 默认模型 | Key 获取链接 |
+|----------|--------------|-------------------|---------|-------------|
+| OpenRouter | `ai_openrouter_key` | `https://openrouter.ai/api/v1` | `openai/gpt-4o` | https://openrouter.ai/keys |
+| Google Gemini | `ai_gemini_key` | `https://generativelanguage.googleapis.com` | `gemini-2.0-flash` | https://aistudio.google.com/app/apikey |
+| DashScope (Qwen) | `ai_dashscope_key` | `https://dashscope.aliyuncs.com` | `qwen-max` | https://dashscope.console.aliyun.com/apiKey |
+| ERNIE (Baidu) | `ai_ernie_key` | `https://aip.baidubce.com` | `ernie-4.5` | https://console.bce.baidu.com/iam/ |
+| Ollama | `ai_ollama_api_key`（可选） | `http://localhost:11434` | `llama3` | 本地部署无需 Key |
+| 自定义 | `ai_{providerName}_key` | 用户填写 | 用户填写 | — |
+
+**保存逻辑**：
+1. 用户填写后点击"保存并刷新"
+2. 调用 `POST /api/ai/config/save`（**需后端新增此接口**）
+3. 后端通过 `ResourceController.setProperty()` 写入配置
+4. 返回 `{ success: true }` 后，前端调用 `aiStore.fetchModelList()` 刷新模型列表
+5. ModelSelector 下拉自动出现新配置的模型
+
+**字段校验**：
+- API Key 不可为空（Ollama 除外）
+- 自定义 Provider 时，Provider Name 不可包含空格或特殊字符（正则 `^[a-zA-Z][a-zA-Z0-9_]*$`）
+- 自定义 Provider 时，模型名必填
+- 保存前可点击"测试连接"（可选）发送轻量请求验证 Key 是否有效
+
+---
+
+## 四、Auto 模式详解
+
+### 4.1 Auto 与 Chat/Build 的关系
+
+**Auto 是与 Chat、Build 并列的第三种模式，三者互斥**，不是 Chat 或 Build 的子选项。
+
+```
+前端三模式
+  ├── Auto   → serviceType 不传（后端自动路由）→ 走 /api/ai/chat/smart
+  ├── Chat   → serviceType='chat'             → 走 /api/ai/chat/message
+  └── Build  → serviceType='agent'            → 走 /api/ai/build/*
+```
+
+### 4.2 后端 Auto 路由规则（`AIServiceLoader.inferServiceType`）
+
+| 传入 action 关键字 | 推断服务 |
+|---|---|
+| `generate-mindmap`, `expand-node`, `summarize`, `tag` | AGENT（DefaultAgentService） |
+| `chat`, `message`, `question`, `answer` | CHAT（DefaultChatService） |
+| `serviceType` 未传或传 `"auto"` | 根据 action 自动推断 |
+
+### 4.3 三种模式的前端行为对比
+
+| 模式 | UI形态 | 用户操作 | 前端传参 | 后端路由 |
+|---|---|---|---|---|
+| **Auto** | 单一自然语言输入框 | 自由描述意图 | 不传 serviceType | BufferLayerRouter → 自动推断 |
+| **Chat** | 对话气泡列表 | 问答对话 | `serviceType='chat'` | DefaultChatService |
+| **Build** | 操作卡片（4个功能） | 点击指定操作 | `serviceType='agent'` + `action=xxx` | DefaultAgentService |
+
+### 4.4 模式与模型的正交关系
+
+Auto/Chat/Build 控制**路由策略**，ModelSelector 控制**使用哪个模型**，两者完全独立：
+
+```
+[ Auto 模式 ] + [ DashScope qwen-max ]  →  后端自动路由 + 用通义千问回答
+[ Chat 模式 ] + [ ERNIE ernie-4.5 ]   →  强制对话服务 + 用文心一言回答
+[ Build 模式 ] + [ OpenRouter gpt-4o ] →  强制Agent服务 + 用GPT-4o操作
+```
+
+---
+
+## 五、关键问题修复说明
+
+### 5.1 国内模型（DashScope/ERNIE）配置后无法生效
+
+**后端 Bug**（需同步反馈给后端同学修复）：
+
+`DefaultChatService.isProviderConfigured()` 和 `DefaultAgentService.isProviderConfigured()` 均只检查：
+```java
+return isNonEmpty(configuration.getOpenRouterKey())
+    || isNonEmpty(configuration.getGeminiKey())
+    || configuration.hasOllamaServiceAddress();
+// ❌ 缺少 DashScope 和 ERNIE 判断
+```
+
+导致配置了国内模型 Key 但服务仍报"未配置"。
+
+**前端应对**：在 `ModelSelector` 和 Build 面板中，当模型列表为空时，给出明确提示：
+```
+⚠️ 未检测到已配置的 AI Provider
+请在 Freeplane → 偏好设置 → AI 配置中填写 API Key
+支持：OpenRouter / Google Gemini / DashScope(通义千问) / ERNIE(文心一言) / Ollama
+```
+
+### 5.2 Build 操作返回结果是文字，不直接操作导图
+
+后端 `DefaultAgentService` 的 expand/summarize/tag 均返回 AI 生成的 **JSON 文字**（非自动执行工具），前端拿到 `result` 字段后需展示结果并提示用户"AI建议已生成，是否应用？"
+
+**前端策略**：
+- Build 面板下方"结果预览"展示 AI 返回的文字
+- 提供"应用到导图"按钮（解析JSON → 调用 createNode/editNode）
+- 或直接展示文字供用户参考手动操作
+
+---
+
+### 5.3 自定义模型配置数据流
+
+```
+用户打开 ModelConfigPanel → 选择 Provider（如 DashScope）
+  → 填写 API Key（自动填充 Base URL 和默认模型）
+  → 点击"保存并刷新"
+  → aiStore.saveCustomModel(config)
+  → aiApi.saveModelConfig({ providerName, apiKey, baseUrl, modelName })
+  → POST /api/ai/config/save  （需后端新增）
+  → 后端 ResourceController.setProperty("ai_dashscope_key", apiKey)
+  → 返回 { success: true }
+  → aiStore.fetchModelList()  ← 刷新模型列表
+  → ModelSelector 下拉自动出现 "DashScope: qwen-max"
+  → 配置面板关闭
+```
+
+**后端需配合事项**：
+
+当前后端 `AiRestController` **无保存配置的 REST 接口**，配置仅能通过桌面端偏好设置完成。需新增：
+
+```java
+// POST /api/ai/config/save
+// 接收: { providerName, apiKey, baseUrl?, modelName? }
+// 逻辑: ResourceController.setProperty("ai_{providerName}_key", apiKey)
+// 返回: { success: true }
+```
+
+**前端降级方案**（若后端暂不新增接口）：
+- 在 ModelSelector 中显示提示："请在 Freeplane 桌面端 → 偏好设置 → AI 配置中填写 API Key"
+- 提供配置指引链接（跳转文档）
+- 用户手动在桌面端配置后，前端调用 `GET /api/ai/chat/models` 即可获取新模型
+
+---
+
+## 六、实现优先级
+
+| 优先级 | 文件 | 改动内容 | 估时 |
+|---|---|---|---|
+| **P0** | `MindMapCanvas.vue` | 调用 `aiStore.init()` | 5分钟 |
+| **P0** | `types/ai.ts` | 修正返回类型 | 10分钟 |
+| **P0** | `aiStore.ts` | 新增 aiMode/buildLoading/buildResult/4个Build方法 | 30分钟 |
+| **P1** | `Toolbar.vue` | 加 AI 按钮 + **Auto/Chat/Build 三 tab 并列** | 30分钟 |
+| **P2** | `AiAutoPanel.vue` | 新建 Auto 自然语言输入面板 | 30分钟 |
+| **P1** | `AiChatPanel.vue` | 新建 Chat 对话面板 | 45分钟 |
+| **P1** | `NodeContextMenu.vue` | 接通 expandNode 调用 | 15分钟 |
+| **P2** | `AiBuildPanel.vue` | 新建 Build 操作面板 | 60分钟 |
+| **P2** | `ModelSelector.vue` | 无需改动（Auto不是模型选项） | — |
+| **P1** | `ModelConfigPanel.vue` | 新建自定义模型配置对话框 | 45分钟 |
+| **P1** | `aiApi.ts` / `aiStore.ts` | 新增 saveModelConfig 接口和方法 | 20分钟 |
+| **P0** | 后端同学 | 新增 `POST /api/ai/config/save` 接口 | 20分钟 |
+| **P3** | `Toolbar.vue` | 搜索接通 `/nodes/search` | 20分钟 |
+| **P3** | `MindMapCanvas.vue` | 右键菜单注册 + 选中节点追踪 | 30分钟 |
+
+---
+
+## 七、数据流图
+
+```
+用户操作
+  │
+  ├─ Toolbar 点击 AI 按钮
+  │     └─ aiStore.panelVisible = true
+  │
+  ├─ Toolbar 切换 Auto | Chat | Build tab（三者并列互斥）
+  │     ├─ Auto  → aiStore.aiMode='auto'
+  │     ├─ Chat  → aiStore.aiMode='chat'  + serviceType='chat'
+  │     └─ Build → aiStore.aiMode='build' + serviceType='agent'
+  │
+  ├─ Auto 面板输入自然语言
+  │     └─ POST /api/ai/chat/smart {input: '帮我展开节点'}
+  │           └─ BufferLayerRouter → 自动路由
+  │
+  ├─ Chat 面板发送消息
+  │     └─ aiStore.sendChat(msg, nodeId)
+  │           └─ POST /api/ai/chat/message {serviceType:'chat'}
+  │                 └─ 后端 AIServiceLoader 强制 → CHAT
+  │                       └─ DefaultChatService → LangChain4j → 模型
+  │
+  ├─ Build 面板点击“AI展开”
+  │     └─ aiStore.expandNode(nodeId)
+  │           └─ POST /api/ai/build/expand-node {action:'expand-node', serviceType:'agent'}
+  │                 └─ 后端 AIServiceLoader 强制 → AGENT
+  │                       └─ DefaultAgentService.handleExpandNode → AI返回JSON文字
+  │                             └─ 前端展示结果 → 用户选择是否应用
+  │
+  └─ 右键菜单 “AI展开节点”
+        └─ aiStore.expandNode(nodeId)
+              └─ 同 Build 面板流程
+                    └─ 操作完成后 mapStore.loadMap() 刷新导图
+```
+
+---
+
+**文档版本**: v1.0  
+**对应后端**: Week 3 工作报告（SPI架构 + DashScope/ERNIE + Auto路由）  
+**最后更新**: 2026-04-20
