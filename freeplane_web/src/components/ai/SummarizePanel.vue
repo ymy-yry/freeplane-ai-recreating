@@ -22,7 +22,7 @@
       </label>
 
       <button class="primary" @click="run" :disabled="!canRun">
-        {{ aiStore.loading ? '生成中...' : '生成摘要' }}
+        {{ aiStore.buildLoading ? '生成中...' : '生成摘要' }}
       </button>
 
       <div v-if="errorMessage" class="error">{{ errorMessage }}</div>
@@ -62,7 +62,7 @@ watch(
   }
 )
 
-const canRun = computed(() => !!props.selectedNodeId && !aiStore.loading)
+const canRun = computed(() => !!props.selectedNodeId && !aiStore.buildLoading)
 
 const run = async () => {
   if (!props.selectedNodeId) return

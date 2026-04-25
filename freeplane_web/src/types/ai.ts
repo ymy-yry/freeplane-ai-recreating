@@ -29,28 +29,32 @@ export interface TokenUsage {
   outputTokens: number
 }
 
+export type AiMode = 'auto' | 'chat' | 'build'
+export type ServiceType = 'auto' | 'chat' | 'agent'
+
 /**
- * 节点扩展结果
+ * 节点扩展结果（兼容新老后端结构）
  */
 export interface ExpandNodeResult {
-  success: boolean
   nodeId: string
-  createdNodes: Array<{
+  result?: string
+  summary?: string
+  createdNodes?: Array<{
     nodeId: string
     text: string
   }>
-  summary: string
+  tokenUsage?: TokenUsage
 }
 
 /**
- * 分支摘要结果
+ * 分支摘要结果（兼容新老后端结构）
  */
 export interface SummarizeResult {
-  success: boolean
   nodeId: string
   summary: string
-  wordCount: number
-  writtenToNote: boolean
+  wordCount?: number
+  writtenToNote?: boolean
+  tokenUsage?: TokenUsage
 }
 
 /**
@@ -66,8 +70,11 @@ export interface SearchResult {
  * 标签结果
  */
 export interface TagResult {
-  nodeId: string
-  tags: string[]
+  nodeId?: string
+  nodeIds?: string[]
+  tags?: string[]
+  result?: string
+  tokenUsage?: TokenUsage
 }
 
 /**
@@ -82,4 +89,11 @@ export interface SmartResponse {
   logs: string[]
   data?: any
   errorMessage?: string
+}
+
+export interface SaveModelConfigPayload {
+  providerName: string
+  apiKey: string
+  baseUrl?: string
+  modelName?: string
 }

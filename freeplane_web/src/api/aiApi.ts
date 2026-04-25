@@ -6,13 +6,14 @@
 import axios from 'axios'
 import type {
   AIModel,
-  ChatMessage,
   TokenUsage,
   ExpandNodeResult,
   SummarizeResult,
   SearchResult,
   TagResult,
-  SmartResponse
+  SmartResponse,
+  ServiceType,
+  SaveModelConfigPayload
 } from '@/types/ai'
 
 const api = axios.create({
@@ -23,13 +24,51 @@ const api = axios.create({
   }
 })
 
+const isRetryableStatus = (status?: number) => status === 404 || status === 405
+
+const getWithFallback = async <T>(primary: string, fallback: string) => {
+  try {
+    return await api.get<T>(primary)
+  } catch (error: any) {
+    if (!isRetryableStatus(error?.response?.status)) throw error
+    return api.get<T>(fallback)
+  }
+}
+
+const postWithFallback = async <T>(primary: string, fallback: string, data: unknown) => {
+  try {
+    return await api.post<T>(primary, data)
+  } catch (error: any) {
+    if (!isRetryableStatus(error?.response?.status)) throw error
+    return api.post<T>(fallback, data)
+  }
+}
+
+// 长超时 API 实例（120 秒，用于 AI 耗时操作）
+const longTimeoutApi = axios.create({
+  baseURL: '/api',
+  timeout: 120000,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
+
+const postWithLongTimeout = async <T>(primary: string, fallback: string, data: unknown) => {
+  try {
+    return await longTimeoutApi.post<T>(primary, data)
+  } catch (error: any) {
+    if (!isRetryableStatus(error?.response?.status)) throw error
+    return longTimeoutApi.post<T>(fallback, data)
+  }
+}
+
 // ==================== AI 模型管理 ====================
 
 /**
  * 获取可用的 AI 模型列表
  */
 export function getAiModels() {
-  return api.get<{ models: AIModel[] }>('/ai/chat/models')
+  return getWithFallback<{ models: AIModel[] }>('/ai/chat/models', '/ai/models')
 }
 
 // ==================== AI 对话 ====================
@@ -42,11 +81,12 @@ export function aiChat(data: {
   modelSelection?: string
   mapId?: string
   selectedNodeId?: string
+  serviceType?: ServiceType
 }) {
-  return api.post<{
+  return postWithFallback<{
     reply: string
     tokenUsage: TokenUsage
-  }>('/ai/chat/message', data)
+  }>('/ai/chat/message', '/ai/chat', data)
 }
 
 /**
@@ -66,7 +106,7 @@ export function aiChatStream(data: {
 // ==================== 节点扩展 ====================
 
 /**
- * AI 扩展节点：基于目标节点生成子节点
+ * AI 扩展节点：基于目标节点生成子节点（耗时操作，超时 120 秒）
  */
 export function expandNode(data: {
   nodeId: string
@@ -74,22 +114,26 @@ export function expandNode(data: {
   count?: number
   depth?: number
   focus?: string
+  modelSelection?: string
+  serviceType?: ServiceType
 }) {
-  return api.post<ExpandNodeResult>('/ai/build/expand-node', data)
+  return postWithLongTimeout<ExpandNodeResult>('/ai/build/expand-node', '/ai/expand-node', data)
 }
 
 // ==================== 分支摘要 ====================
 
 /**
- * AI 生成分支摘要
+ * AI 生成分支摘要（耗时操作，超时 120 秒）
  */
 export function summarizeBranch(data: {
   nodeId: string
   mapId?: string
   maxWords?: number
   writeToNote?: boolean
+  modelSelection?: string
+  serviceType?: ServiceType
 }) {
-  return api.post<SummarizeResult>('/ai/build/summarize', data)
+  return postWithLongTimeout<SummarizeResult>('/ai/build/summarize', '/ai/summarize', data)
 }
 
 // ==================== 节点搜索 ====================
@@ -111,16 +155,18 @@ export function searchNodes(data: {
 // ==================== 自动标签 ====================
 
 /**
- * AI 提取节点关键词标签
+ * AI 提取节点关键词标签（耗时操作，超时 120 秒）
  */
 export function autoTag(data: {
   nodeIds: string[]
   mapId?: string
+  modelSelection?: string
+  serviceType?: ServiceType
 }) {
-  return api.post<{
+  return postWithLongTimeout<{
     results: TagResult[]
     message: string
-  }>('/ai/build/tag', data)
+  }>('/ai/build/tag', '/ai/tag', data)
 }
 
 // ==================== 智能缓冲层 ====================
@@ -130,26 +176,36 @@ export function autoTag(data: {
  */
 export function smartRequest(data: {
   input: string
+  modelSelection?: string
+  mapId?: string
+  selectedNodeId?: string
 }) {
-  return api.post<SmartResponse>('/ai/chat/smart', data)
+  return postWithFallback<SmartResponse>('/ai/chat/smart', '/ai/smart', data)
 }
 
 // ==================== 思维导图生成 ====================
 
 /**
- * AI 一键生成思维导图
+ * AI 一键生成思维导图（耗时操作，超时 120 秒）
  */
 export function generateMindMap(data: {
   topic: string
   modelSelection?: string
   maxDepth?: number
+  serviceType?: ServiceType
 }) {
-  return api.post<{
+  return postWithLongTimeout<{
     success: boolean
     topic: string
     nodeCount: number
     mapId: string
-  }>('/ai/build/generate-mindmap', data)
+    result?: string
+    tokenUsage?: TokenUsage
+  }>('/ai/build/generate-mindmap', '/ai/generate-mindmap', data)
+}
+
+export function saveModelConfig(data: SaveModelConfigPayload) {
+  return api.post<{ success: boolean }>('/ai/config/save', data)
 }
 
 export default api

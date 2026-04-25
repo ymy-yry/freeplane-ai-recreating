@@ -9,7 +9,15 @@ import org.freeplane.features.map.mindmapmode.MMapController;
 import org.freeplane.plugin.ai.buffer.BufferRequest;
 import org.freeplane.plugin.ai.buffer.BufferResponse;
 import org.freeplane.plugin.ai.buffer.IBufferLayer;
+import org.freeplane.plugin.ai.chat.AIChatModelFactory;
+import org.freeplane.plugin.ai.chat.AIProviderConfiguration;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -131,23 +139,55 @@ public class MindMapBufferLayer implements IBufferLayer {
         return response;
     }
 
+    // 懒初始化的底层 ChatModel（双重检查锁），绕开 AIChatService 的复杂 system message
+    private volatile ChatModel chatModel;
+
     /**
-     * 调用 AI 模型
-     * TODO: 需要集成实际的 AI 调用逻辑（使用 AIChatPanel 或其他服务）
+     * 懒初始化 ChatModel
      */
-    private String callAI(String prompt, String selectedModel, BufferRequest request) {
-        // 这里是占位实现，需要替换为实际的 AI 调用
-        LogUtils.info("MindMapBufferLayer: calling AI model " + selectedModel);
-
-        // TODO: 集成实际的 AI 服务调用
-        // 可以参考 AiRestController.executeChat() 的实现
-
-        // 临时返回示例 JSON
-        return createSampleMindMapJSON(request.getParameter("topic", "主题"));
+    private void ensureChatModelInitialized() {
+        if (chatModel == null) {
+            synchronized (this) {
+                if (chatModel == null) {
+                    try {
+                        AIProviderConfiguration configuration = new AIProviderConfiguration();
+                        chatModel = AIChatModelFactory.createChatLanguageModel(configuration);
+                        LogUtils.info("MindMapBufferLayer: ChatModel initialized");
+                    } catch (Exception e) {
+                        LogUtils.warn("MindMapBufferLayer: failed to initialize ChatModel", e);
+                    }
+                }
+            }
+        }
     }
 
     /**
-     * 创建示例思维导图 JSON（用于测试）
+     * 调用真实 AI 模型（使用底层 ChatModel，避免 AIChatService 的 system message 干扰）
+     */
+    private String callAI(String prompt, String selectedModel, BufferRequest request) {
+        LogUtils.info("MindMapBufferLayer: calling AI model " + selectedModel);
+        ensureChatModelInitialized();
+        if (chatModel == null) {
+            LogUtils.warn("MindMapBufferLayer: ChatModel unavailable, using sample JSON");
+            return createSampleMindMapJSON(request.getParameter("topic", "主题"));
+        }
+        try {
+            ChatRequest chatRequest = ChatRequest.builder()
+                .messages(Arrays.asList(
+                    SystemMessage.from("You are a mind map expert. Return only valid JSON, no markdown, no explanation."),
+                    UserMessage.from(prompt)
+                ))
+                .build();
+            ChatResponse chatResponse = chatModel.chat(chatRequest);
+            return chatResponse.aiMessage().text();
+        } catch (Exception e) {
+            LogUtils.warn("MindMapBufferLayer: AI call failed", e);
+            return createSampleMindMapJSON(request.getParameter("topic", "主题"));
+        }
+    }
+
+    /**
+     * 兜底示例 JSON（AI 不可用时使用）
      */
     private String createSampleMindMapJSON(String topic) {
         return String.format(

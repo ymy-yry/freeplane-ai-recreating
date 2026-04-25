@@ -4,6 +4,11 @@
 	  <button @click="handleCenterView" title="居中导图">📍 居中</button>
 	  <button @click="handleRefresh" title="刷新导图">🔄 刷新</button>
 	  <button @click="handleToggleAI" title="AI 面板">🤖 AI</button>
+	  <div v-if="aiStore.panelVisible" class="mode-tabs">
+		<button class="mode-btn" :class="{ active: aiStore.aiMode === 'auto' }" @click="aiStore.setMode('auto')">Auto</button>
+		<button class="mode-btn" :class="{ active: aiStore.aiMode === 'chat' }" @click="aiStore.setMode('chat')">Chat</button>
+		<button class="mode-btn" :class="{ active: aiStore.aiMode === 'build' }" @click="aiStore.setMode('build')">Build</button>
+	  </div>
 	  
 	  <div class="toolbar-divider"></div>
 	  
@@ -74,10 +79,19 @@
 	exportToJSON(store.currentMap)
   }
   
-  const handleSearch = () => {
-	if (!searchQuery.value.trim()) return
-	console.log('[搜索] 关键词：', searchQuery.value)
-	searchQuery.value = ''
+  const handleSearch = async () => {
+	const query = searchQuery.value.trim()
+	if (!query || !store.currentMap?.mapId) return
+	try {
+	  const res = await aiStore.keywordSearch({ query, mapId: store.currentMap.mapId })
+	  const first = res.results?.[0]
+	  if (!first) return
+	  const node = props.vueFlow.findNode(first.nodeId)
+	  if (!node) return
+	  props.vueFlow.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 250 })
+	} finally {
+	  searchQuery.value = ''
+	}
   }
   
   const handleToggleAI = () => {
@@ -137,5 +151,28 @@
   
   .search-input:focus {
 	border-color: #1890ff;
+  }
+
+  .mode-tabs {
+	display: flex;
+	gap: 4px;
+	padding: 2px;
+	background: #f1f5f9;
+	border-radius: 8px;
+  }
+
+  .mode-btn {
+	padding: 4px 10px;
+	font-size: 12px;
+	border: none;
+	background: transparent;
+	border-radius: 6px;
+	cursor: pointer;
+  }
+
+  .mode-btn.active {
+	background: #fff;
+	box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+	color: #2563eb;
   }
   </style>
