@@ -11,7 +11,6 @@
 		:edges-updatable="false"
 		:connection-line-style="{ stroke: '#666', strokeWidth: 2 }"
 		:default-edge-options="{ type: 'bezier' }"
-		@node-drag-stop="handleNodeDragStop"
 		@node-context-menu="handleNodeContextMenu"
 		@pane-click="hideContextMenu"
 	  >
@@ -74,7 +73,6 @@
   import AiBuildPanel from './ai/AiBuildPanel.vue'
   import NodeContextMenu from './NodeContextMenu.vue'
   import { treeToFlow } from '@/utils/treeToFlow'
-  import { applyNodePositions, hasNodePositions, saveNodePosition } from '@/utils/nodePositionCache'
   
   const store = useMapStore()
   const aiStore = useAIStore()
@@ -83,7 +81,6 @@
   const nodes = ref<Node[]>([])
   const edges = ref<Edge[]>([])
   const selectedNodeId = ref<string>('')
-  const lastRenderedMapId = ref('')
   
   const editPanel = ref({ visible: false, nodeId: '', text: '' })
   
@@ -105,21 +102,19 @@
   const updateFlow = async () => {
 	if (!store.currentMap?.root) return
   
-	const mapId = store.currentMap.mapId
-	const previousNodeCount = nodes.value.length
-	const hadCachedPositions = hasNodePositions(mapId)
 	const { nodes: newNodes, edges: newEdges } = treeToFlow(store.currentMap.root)
-
-	nodes.value = applyNodePositions(mapId, [...newNodes])
+  
+	// 使用全新数组引用，确保 Vue Flow 完全重新渲染
+	nodes.value = newNodes.map((newNode: Node) => {
+	  const existing = nodes.value.find((n: Node) => n.id === newNode.id)
+	  return existing ? { ...newNode, position: { ...existing.position } } : newNode
+	})
+  
 	edges.value = [...newEdges]
   
+	// 强制刷新布局
 	await nextTick()
-	const mapSwitched = lastRenderedMapId.value !== mapId
-	const structureChanged = previousNodeCount !== newNodes.length
-	if (mapSwitched || (structureChanged && !hadCachedPositions)) {
-	  vueFlow.fitView({ padding: 0.15, duration: 200 })
-	}
-	lastRenderedMapId.value = mapId
+	vueFlow.fitView({ padding: 0.15, duration: 200 })
   }
   
   const updateSelectedNodeId = () => {
@@ -233,14 +228,6 @@
 
   const handleAIExpand = async (nodeId: string) => {
 	await aiStore.expandNode({ mapId: store.currentMap?.mapId, nodeId })
-  }
-
-  const handleNodeDragStop = (event: any) => {
-	const mapId = store.currentMap?.mapId
-	const nodeId = event?.node?.id
-	const position = event?.node?.position
-	if (!mapId || !nodeId || !position) return
-	saveNodePosition(mapId, nodeId, position)
   }
 
   const handleAISummarize = async (nodeId: string) => {

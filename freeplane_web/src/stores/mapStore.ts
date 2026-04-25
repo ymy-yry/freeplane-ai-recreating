@@ -66,18 +66,6 @@ export const useMapStore = defineStore('map', () => {
     }
   }
 
-  const setCurrentMap = (mapData: MindMapData) => {
-    currentMap.value = mapData
-  }
-
-  const pausePolling = () => {
-    stopPolling()
-  }
-
-  const resumePolling = () => {
-    startPolling()
-  }
-
   return {
     currentMap,
     loading,
@@ -87,9 +75,6 @@ export const useMapStore = defineStore('map', () => {
     createNode,
     editNode,
     deleteNode,
-    toggleNodeFold,
-    setCurrentMap,
-    pausePolling,
-    resumePolling
+    toggleNodeFold
   }
 })
