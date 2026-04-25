@@ -180,7 +180,7 @@ export function smartRequest(data: {
   mapId?: string
   selectedNodeId?: string
 }) {
-  return postWithFallback<SmartResponse>('/ai/chat/smart', '/ai/smart', data)
+  return postWithLongTimeout<SmartResponse>('/ai/chat/smart', '/ai/smart', data)
 }
 
 // ==================== 思维导图生成 ====================
