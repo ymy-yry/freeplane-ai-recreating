@@ -121,9 +121,24 @@
 	const selected = vueFlow.nodes.value.find((n: any) => n.selected)
 	selectedNodeId.value = selected?.id || ''
   }
+
+  const isEditableTarget = (target: EventTarget | null) => {
+	if (!(target instanceof HTMLElement)) return false
+	const tagName = target.tagName
+	return (
+	  tagName === 'INPUT' ||
+	  tagName === 'TEXTAREA' ||
+	  tagName === 'SELECT' ||
+	  target.isContentEditable ||
+	  !!target.closest('[contenteditable="true"]')
+	)
+  }
   
   const handleKeyDown = (e: KeyboardEvent) => {
 	if (e.key !== 'Tab') return
+	if (e.repeat) return
+	if (editPanel.value.visible || actionModal.value.visible) return
+	if (isEditableTarget(e.target)) return
 	e.preventDefault()
   
 	const selectedNode = vueFlow.nodes.value.find((n: any) => n.selected)
