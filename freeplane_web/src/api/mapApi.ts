@@ -87,3 +87,21 @@ export const deleteMap = async (request: DeleteMapRequest): Promise<DeleteMapRes
   const res = await api.post('/maps/delete', request)
   return res.data
 }
+
+// 2.1 新增：导入导图
+export interface ImportMapRequest {
+  content: string   // .mm 文件的 XML 字符串
+  filename?: string
+}
+
+export interface ImportMapResponse {
+  success: boolean
+  mapId: string
+  title: string
+  filename: string
+}
+
+export const importMap = async (request: ImportMapRequest): Promise<ImportMapResponse> => {
+  const res = await api.post('/maps/import', request)
+  return res.data
+}

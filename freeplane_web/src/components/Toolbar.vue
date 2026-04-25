@@ -18,6 +18,15 @@
 	  <!-- 新增：刷新导图列表按钮 -->
 	  <button @click="handleLoadAllMaps" title="刷新导图列表" class="refresh-maps-btn">🔄 列表</button>
 	  
+	  <button @click="handleImportClick" title="导入 .mm 文件">📥 导入</button>
+	  <input 
+		ref="importFileInput" 
+		type="file" 
+		accept=".mm" 
+		style="display:none" 
+		@change="handleImportFile" 
+	  />
+	  
 	  <button @click="handleToggleAI" title="AI 面板">🤖 AI</button>
 	  <div v-if="aiStore.panelVisible" class="mode-tabs">
 		<button class="mode-btn" :class="{ active: aiStore.aiMode === 'auto' }" @click="aiStore.setMode('auto')">Auto</button>
@@ -58,6 +67,7 @@
   const aiStore = useAIStore()
   const searchQuery = ref('')
   const selectedMapId = ref('')
+  const importFileInput = ref<HTMLInputElement | null>(null)  // 2.3 添加导入文件输入引用
   
   // 初始化时加载导图列表
   onMounted(async () => {
@@ -110,6 +120,26 @@
 	} catch (error) {
 	  console.error('加载导图列表失败:', error)
 	  alert('加载导图列表失败: ' + (error as Error).message)
+	}
+  }
+  
+  // 2.3 新增：处理导入点击
+  const handleImportClick = () => {
+	importFileInput.value?.click()
+  }
+  
+  // 2.3 新增：处理导入文件
+  const handleImportFile = async (event: Event) => {
+	const input = event.target as HTMLInputElement 
+	const file = input.files?.[0]
+	if (!file) return
+	try {
+	  await store.importMap(file)
+	  alert(`导入成功：${file.name}`)
+	} catch (error) {
+	  alert('导入失败: ' + (error as Error).message)
+	} finally {
+	  input.value = ''   // 重置，允许重复选择同一文件
 	}
   }
   

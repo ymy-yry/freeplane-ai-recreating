@@ -89,6 +89,18 @@ export const useMapStore = defineStore('map', () => {
     }
   }
 
+  // 2.2 新增：导入导图
+  const importMap = async (file: File) => {
+    const content = await file.text()           // 读取 File 对象为字符串
+    const response = await mapApi.importMap({ content, filename: file.name })
+    if (response.success) {
+      await loadAllMaps()                       // 刷新导图列表
+      await loadMap()                           // 切换到新导入的导图
+      return response
+    }
+    throw new Error('导入导图失败')
+  }
+
   const startPolling = () => {
     if (pollingInterval) clearInterval(pollingInterval)
     pollingInterval = setInterval(loadMap, 3000)
@@ -153,6 +165,7 @@ export const useMapStore = defineStore('map', () => {
     createNewMap,
     switchCurrentMap,
     deleteMap,
+    importMap,  // 需要在 return {} 中暴露 importMap
     startPolling,
     stopPolling,
     createNode,
