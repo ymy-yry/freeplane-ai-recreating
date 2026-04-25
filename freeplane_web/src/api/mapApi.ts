@@ -9,59 +9,81 @@ export const getCurrentMap = async (): Promise<MindMapData> => {
 }
 
 export const createNode = async (mapId: string, parentId: string, text: string) => {
-  // 根据后端支持，mapId是可选的，不传则使用当前激活的导图
-  const payload = { parentId, text, position: 'child' }
-  if (mapId) {
-    (payload as any).mapId = mapId
-  }
-  await api.post('/nodes/create', payload)
+  await api.post('/nodes/create', { mapId, parentId, text, position: 'child' })
 }
 
 export const editNode = async (mapId: string, nodeId: string, text: string) => {
-  const payload = { nodeId, text }
-  if (mapId) {
-    (payload as any).mapId = mapId
-  }
-  await api.post('/nodes/edit', payload)
+  await api.post('/nodes/edit', { mapId, nodeId, text })
 }
 
 export const deleteNode = async (mapId: string, nodeId: string) => {
-  const payload = { nodeId }
-  if (mapId) {
-    (payload as any).mapId = mapId
-  }
-  await api.post('/nodes/delete', payload)
+  await api.post('/nodes/delete', { mapId, nodeId })
 }
 
 export const toggleFold = async (mapId: string, nodeId: string, folded: boolean) => {
-  const payload = { nodeId, folded }
-  if (mapId) {
-    (payload as any).mapId = mapId
-  }
-  await api.post('/nodes/toggle-fold', payload)
+  await api.post('/nodes/toggle-fold', { mapId, nodeId, folded })
 }
 
-// 多导图API接口
-export const createNewMap = async (title: string): Promise<MindMapData> => {
-  // 后端可能通过创建新文件或新MapModel来实现
-  const res = await api.post('/map/create', { title })
+// 新增：获取所有导图列表
+export interface MapInfo {
+  mapId: string
+  title: string
+  isCurrent: boolean
+}
+
+export interface GetAllMapsResponse {
+  maps: MapInfo[]
+  count: number
+}
+
+export const getAllMaps = async (): Promise<GetAllMapsResponse> => {
+  const res = await api.get('/maps')
   return res.data
 }
 
-export const switchMap = async (mapId: string): Promise<MindMapData> => {
-  // 切换当前激活的导图
-  const res = await api.post('/map/switch', { mapId })
+// 新增：创建新导图
+export interface CreateMapRequest {
+  title?: string
+}
+
+export interface CreateMapResponse {
+  message: string
+  mapId: string
+  title: string
+  success: boolean
+}
+
+export const createNewMap = async (request?: CreateMapRequest): Promise<CreateMapResponse> => {
+  const res = await api.post('/maps/create', request || {})
   return res.data
 }
 
-export const getAllMaps = async (): Promise<{ mapId: string; title: string }[]> => {
-  // 获取所有已打开的导图列表
-  const res = await api.get('/map/all')
+// 新增：切换当前导图
+export interface SwitchMapRequest {
+  mapId: string
+}
+
+export interface SwitchMapResponse {
+  success: boolean
+  message?: string
+}
+
+export const switchMap = async (request: SwitchMapRequest): Promise<SwitchMapResponse> => {
+  const res = await api.post('/maps/switch', request)
   return res.data
 }
 
-// 新增：获取导图详细信息
-export const getMapDetails = async (mapId: string): Promise<MindMapData> => {
-  const res = await api.get(`/map/${mapId}`)
+// 新增：删除导图
+export interface DeleteMapRequest {
+  mapId: string
+}
+
+export interface DeleteMapResponse {
+  success: boolean
+  message?: string
+}
+
+export const deleteMap = async (request: DeleteMapRequest): Promise<DeleteMapResponse> => {
+  const res = await api.post('/maps/delete', request)
   return res.data
 }

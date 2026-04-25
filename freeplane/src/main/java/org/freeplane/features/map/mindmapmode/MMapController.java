@@ -385,9 +385,11 @@ public class MMapController extends MapController {
 
     @Override
     synchronized public void closeWithoutSaving(final MapModel map) {
-        loadedMaps.remove(map);
-        super.closeWithoutSaving(map);
-    }
+		if (loadedMaps != null) {
+			loadedMaps.remove(map);
+		}
+		super.closeWithoutSaving(map);
+	}
 
     private void createActions(ModeController modeController) {
         modeController.addAction(new NewMapViewAction());
@@ -1047,18 +1049,22 @@ public class MMapController extends MapController {
 
 
     synchronized public MMapModel getMap(URL url) {
-        for(MMapModel hiddenMap : loadedMaps.keySet()) {
-            if(url.equals(hiddenMap.getURL()))
-                return hiddenMap;
-        }
-        return null;
-    }
+		if (loadedMaps == null) {
+			return null;
+		}
+		for(MMapModel hiddenMap : loadedMaps.keySet()) {
+			if(url.equals(hiddenMap.getURL()))
+				return hiddenMap;
+		}
+		return null;
+	}
 
 
     synchronized public void addLoadedMap(MMapModel map) {
-        loadedMaps.put(map, null);
-    }
-
+		if (loadedMaps != null) {
+			loadedMaps.put(map, null);
+		}
+	}
 
     public MMapModel createUntitledMap(final URL url, boolean follow) throws IOException, XMLException {
         return (MMapModel) new MapLoader(getMModeController()).load(url).unsetMapLocation(follow).withView().getMap();

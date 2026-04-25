@@ -10,11 +10,20 @@
 	  <div class="menu-item" @click="handleCreateChild">
 		➕ 新建子节点
 	  </div>
+	  <div class="menu-item" @click="handleFold">
+		▼ 折叠节点
+	  </div>
+	  <div class="menu-item" @click="handleUnfold">
+		▶ 展开节点
+	  </div>
 	  <div class="menu-item" @click="handleDelete">
 		🗑️ 删除节点
 	  </div>
 	  <div class="menu-item ai-item" @click="handleAIExpand">
 		🤖 AI 展开节点
+	  </div>
+	  <div class="menu-item ai-item" @click="handleAISummarize">
+		📝 AI 分支摘要
 	  </div>
 	  <div class="divider"></div>
 	  <div class="menu-item" @click="emit('close')">
@@ -34,7 +43,11 @@
   const emit = defineEmits<{
 	(e: 'edit', nodeId: string): void
 	(e: 'create-child', nodeId: string): void
+	(e: 'fold', nodeId: string): void
+	(e: 'unfold', nodeId: string): void
 	(e: 'delete', nodeId: string): void
+	(e: 'ai-expand', nodeId: string): void
+	(e: 'ai-summarize', nodeId: string): void
 	(e: 'close'): void
   }>()
   
@@ -46,13 +59,27 @@
 	emit('create-child', props.nodeId)
   }
   
+  const handleFold = () => {
+	emit('fold', props.nodeId)
+	emit('close')
+  }
+  
+  const handleUnfold = () => {
+	emit('unfold', props.nodeId)
+	emit('close')
+  }
+  
   const handleDelete = () => {
 	emit('delete', props.nodeId)
   }
   
   const handleAIExpand = () => {
-	console.log('[AI 展开] 节点ID:', props.nodeId)
-	// 成员C后续可在此处扩展 AI 功能
+	emit('ai-expand', props.nodeId)
+	emit('close')
+  }
+
+  const handleAISummarize = () => {
+	emit('ai-summarize', props.nodeId)
 	emit('close')
   }
   </script>

@@ -39,13 +39,11 @@ public class AIChatService {
         Objects.requireNonNull(chatTokenUsageTracker, "chatTokenUsageTracker");
         this.toolCallSummaryHandler = toolCallSummaryHandler;
         this.toolArgumentsErrorHandler = buildToolArgumentsErrorHandler();
-        ToolExecutorFactory toolExecutorFactory = new ToolExecutorFactory(true, true, cancellationSupplier);
-        ToolExecutorRegistry toolExecutorRegistry = toolExecutorFactory.createRegistry(toolSet);
         AiServices<AIAssistant> builder = AiServices.builder(AIAssistant.class)
             .toolArgumentsErrorHandler(toolArgumentsErrorHandler)
             .chatModel(chatLanguageModel)
             .systemMessageProvider(toolSet::systemMessageForChat)
-            .tools(toolExecutorRegistry.getExecutorsBySpecification())
+            .tools(toolSet)
             .registerListener(new AiServiceListener<AiServiceErrorEvent>() {
 
                 @Override
