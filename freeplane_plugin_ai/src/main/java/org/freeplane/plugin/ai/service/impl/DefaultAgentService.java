@@ -16,6 +16,10 @@ import org.freeplane.plugin.ai.service.AIServiceResponse;
 import org.freeplane.plugin.ai.service.AIServiceType;
 import org.freeplane.plugin.ai.service.ToolExecutionService;
 import org.freeplane.plugin.ai.service.impl.DefaultToolExecutionService;
+import org.freeplane.plugin.ai.service.scheduling.BuildTask;
+import org.freeplane.plugin.ai.service.scheduling.BuildTaskScheduler;
+import org.freeplane.plugin.ai.service.scheduling.SchedulingConfig;
+import org.freeplane.plugin.ai.service.scheduling.SchedulingMonitor;
 import org.freeplane.plugin.ai.tools.AIToolSet;
 import org.freeplane.plugin.ai.tools.AIToolSetBuilder;
 import org.freeplane.plugin.ai.tools.utilities.ToolCallSummaryHandler;
@@ -47,6 +51,9 @@ public class DefaultAgentService implements AIService {
     private static final AtomicInteger outputTokens = new AtomicInteger(0);
     private static Properties promptTemplates;
     private static volatile ToolExecutionService toolExecutionService;
+    private static volatile BuildTaskScheduler taskScheduler;
+    private static volatile SchedulingConfig schedulingConfig;
+    private static volatile SchedulingMonitor schedulingMonitor;
 
     static {
         loadPromptTemplates();
@@ -96,19 +103,43 @@ public class DefaultAgentService implements AIService {
                 return AIServiceResponse.error("Action is required");
             }
 
-            switch (action) {
-                case "generate-mindmap":
-                    return handleGenerateMindMap(request);
-                case "expand-node":
-                    return handleExpandNode(request);
-                case "summarize":
-                    return handleSummarize(request);
-                case "tag":
-                    return handleTag(request);
-                case "execute-tool":
-                    return handleExecuteTool(request);
-                default:
-                    return AIServiceResponse.error("Unknown action: " + action);
+            // Check if scheduling is enabled
+            if (schedulingConfig != null && schedulingConfig.isEnabled() && taskScheduler != null) {
+                // Use scheduler for build tasks
+                BuildTask task = taskScheduler.submitTask(action, request);
+                
+                // For now, we'll still process synchronously for compatibility
+                // In a real implementation, this would return a task ID and use async processing
+                switch (action) {
+                    case "generate-mindmap":
+                        return handleGenerateMindMap(request);
+                    case "expand-node":
+                        return handleExpandNode(request);
+                    case "summarize":
+                        return handleSummarize(request);
+                    case "tag":
+                        return handleTag(request);
+                    case "execute-tool":
+                        return handleExecuteTool(request);
+                    default:
+                        return AIServiceResponse.error("Unknown action: " + action);
+                }
+            } else {
+                // Fallback to direct processing if scheduling is disabled
+                switch (action) {
+                    case "generate-mindmap":
+                        return handleGenerateMindMap(request);
+                    case "expand-node":
+                        return handleExpandNode(request);
+                    case "summarize":
+                        return handleSummarize(request);
+                    case "tag":
+                        return handleTag(request);
+                    case "execute-tool":
+                        return handleExecuteTool(request);
+                    default:
+                        return AIServiceResponse.error("Unknown action: " + action);
+                }
             }
         } catch (Exception e) {
             LogUtils.warn("DefaultAgentService.processRequest failed", e);
@@ -122,8 +153,16 @@ public class DefaultAgentService implements AIService {
             return AIServiceResponse.error("Topic is required");
         }
 
+        // Create task for monitoring
+        BuildTask task = new BuildTask("generate-mindmap", request);
+        
         try {
             ensureAgentInitialized();
+            
+            // Record task start
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskStart(task);
+            }
 
             String prompt = buildMindMapPrompt(topic, request);
             String result = chatWithModel(
@@ -141,8 +180,17 @@ public class DefaultAgentService implements AIService {
                 )
             );
 
+            // Record task completion
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, true);
+            }
+
             return AIServiceResponse.success("Mindmap prompt generated", data);
         } catch (Exception e) {
+            // Record task failure
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, false);
+            }
             LogUtils.warn("DefaultAgentService.handleGenerateMindMap failed", e);
             return AIServiceResponse.error("Failed to generate mindmap: " + e.getMessage());
         }
@@ -154,8 +202,16 @@ public class DefaultAgentService implements AIService {
             return AIServiceResponse.error("NodeId is required");
         }
 
+        // Create task for monitoring
+        BuildTask task = new BuildTask("expand-node", request);
+        
         try {
             ensureAgentInitialized();
+            
+            // Record task start
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskStart(task);
+            }
 
             String mapId = (String) request.get("mapId");
             Integer depth = (Integer) request.get("depth");
@@ -177,8 +233,17 @@ public class DefaultAgentService implements AIService {
                 )
             );
 
+            // Record task completion
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, true);
+            }
+
             return AIServiceResponse.success("Node expansion prompt generated", data);
         } catch (Exception e) {
+            // Record task failure
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, false);
+            }
             LogUtils.warn("DefaultAgentService.handleExpandNode failed", e);
             return AIServiceResponse.error("Failed to expand node: " + e.getMessage());
         }
@@ -190,8 +255,16 @@ public class DefaultAgentService implements AIService {
             return AIServiceResponse.error("NodeId is required");
         }
 
+        // Create task for monitoring
+        BuildTask task = new BuildTask("summarize", request);
+        
         try {
             ensureAgentInitialized();
+            
+            // Record task start
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskStart(task);
+            }
 
             String mapId = (String) request.get("mapId");
             Integer maxWords = (Integer) request.get("maxWords");
@@ -212,8 +285,17 @@ public class DefaultAgentService implements AIService {
                 )
             );
 
+            // Record task completion
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, true);
+            }
+
             return AIServiceResponse.success("Branch summarized", data);
         } catch (Exception e) {
+            // Record task failure
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, false);
+            }
             LogUtils.warn("DefaultAgentService.handleSummarize failed", e);
             return AIServiceResponse.error("Failed to summarize: " + e.getMessage());
         }
@@ -226,8 +308,16 @@ public class DefaultAgentService implements AIService {
             return AIServiceResponse.error("NodeIds is required");
         }
 
+        // Create task for monitoring
+        BuildTask task = new BuildTask("tag", request);
+        
         try {
             ensureAgentInitialized();
+            
+            // Record task start
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskStart(task);
+            }
 
             String mapId = (String) request.get("mapId");
             String prompt = buildTagPrompt(nodeIds, mapId);
@@ -245,8 +335,17 @@ public class DefaultAgentService implements AIService {
                 )
             );
 
+            // Record task completion
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, true);
+            }
+
             return AIServiceResponse.success("Tags generated", data);
         } catch (Exception e) {
+            // Record task failure
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, false);
+            }
             LogUtils.warn("DefaultAgentService.handleTag failed", e);
             return AIServiceResponse.error("Failed to generate tags: " + e.getMessage());
         }
@@ -302,8 +401,15 @@ public class DefaultAgentService implements AIService {
                         toolExecutionService = new DefaultToolExecutionService();
                         toolExecutionService.setToolSet(toolSet);
 
+                        // 初始化调度组件
+                        schedulingConfig = SchedulingConfig.getInstance();
+                        schedulingMonitor = SchedulingMonitor.getInstance();
+                        taskScheduler = BuildTaskScheduler.getInstance();
+                        taskScheduler.start();
+
                         LogUtils.info("DefaultAgentService: Agent AIChatService initialized successfully");
                         LogUtils.info("DefaultAgentService: ToolExecutionService initialized successfully");
+                        LogUtils.info("DefaultAgentService: Scheduling components initialized successfully");
                     } catch (Exception e) {
                         LogUtils.warn("DefaultAgentService: Failed to initialize Agent AIChatService", e);
                     }
@@ -524,8 +630,16 @@ public class DefaultAgentService implements AIService {
     }
 
     private AIServiceResponse handleExecuteTool(Map<String, Object> request) {
+        // Create task for monitoring
+        BuildTask task = new BuildTask("execute-tool", request);
+        
         try {
             ensureAgentInitialized();
+            
+            // Record task start
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskStart(task);
+            }
 
             String toolName = (String) request.get("toolName");
             if (toolName == null || toolName.trim().isEmpty()) {
@@ -552,8 +666,17 @@ public class DefaultAgentService implements AIService {
                 "result", result
             );
 
+            // Record task completion
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, true);
+            }
+
             return AIServiceResponse.success("Tool executed successfully", data);
         } catch (Exception e) {
+            // Record task failure
+            if (schedulingMonitor != null) {
+                schedulingMonitor.recordTaskComplete(task, false);
+            }
             LogUtils.warn("DefaultAgentService.handleExecuteTool failed", e);
             return AIServiceResponse.error("Failed to execute tool: " + e.getMessage());
         }
