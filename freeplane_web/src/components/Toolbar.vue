@@ -15,6 +15,14 @@
 	  <button @click="handleExport" title="导出导图" class="export-btn">💾 导出</button>
 	  <button @click="handleExportMM" title="导出为 Freeplane 格式" class="export-btn">📄 .mm</button>
 	  <button @click="handleExportJSON" title="导出为 JSON 备份" class="export-btn">📦 .json</button>
+	  <button @click="triggerImport" title="导入 JSON 或 MM" class="import-btn">📥 导入</button>
+	  <input
+		ref="importInput"
+		type="file"
+		accept=".json,.mm,.xml,application/json,application/xml,text/xml"
+		class="hidden-input"
+		@change="handleImportFile"
+	  />
 	  
 	  <div class="toolbar-divider"></div>
 	  
@@ -32,7 +40,7 @@
   <script setup lang="ts">
   import { ref } from 'vue'
   import { useMapStore } from '@/stores/mapStore'
-  import { exportToMM, exportToJSON, showExportDialog } from '@/utils/exportUtils'
+  import { exportToMM, exportToJSON, importMindMapFile, showExportDialog } from '@/utils/exportUtils'
   import { useAIStore } from '@/stores/aiStore'
   
   const props = defineProps<{
@@ -42,6 +50,7 @@
   const store = useMapStore()
   const aiStore = useAIStore()
   const searchQuery = ref('')
+  const importInput = ref<HTMLInputElement | null>(null)
   
   const handleFitView = () => {
 	props.vueFlow.fitView({ padding: 0.2, duration: 300 })
@@ -52,6 +61,7 @@
   }
   
   const handleRefresh = async () => {
+	store.resumePolling()
 	await store.loadMap()
   }
   
@@ -77,6 +87,27 @@
 	  return
 	}
 	exportToJSON(store.currentMap)
+  }
+
+  const triggerImport = () => {
+	importInput.value?.click()
+  }
+
+  const handleImportFile = async (event: Event) => {
+	const input = event.target as HTMLInputElement
+	const file = input.files?.[0]
+	if (!file) return
+	try {
+	  const importedMap = await importMindMapFile(file)
+	  store.pausePolling()
+	  store.setCurrentMap(importedMap)
+	  props.vueFlow.fitView({ padding: 0.22, duration: 250 })
+	} catch (error) {
+	  const message = error instanceof Error ? error.message : '导入失败'
+	  alert(message)
+	} finally {
+	  input.value = ''
+	}
   }
   
   const handleSearch = async () => {
@@ -130,6 +161,10 @@
   .search-input {
 	width: 180px;
   }
+
+  .hidden-input {
+	display: none;
+  }
   
   .toolbar-divider {
 	width: 1px;
@@ -147,6 +182,17 @@
 	background: #4caf50;
 	color: white;
 	border-color: #4caf50;
+  }
+
+  .import-btn {
+	background: #eef6ff;
+	border-color: #4a90e2;
+  }
+
+  .import-btn:hover {
+	background: #4a90e2;
+	color: #fff;
+	border-color: #4a90e2;
   }
   
   .search-input:focus {
