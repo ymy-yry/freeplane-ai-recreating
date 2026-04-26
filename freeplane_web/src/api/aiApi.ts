@@ -10,7 +10,6 @@ import type {
   ExpandNodeResult,
   SummarizeResult,
   SearchResult,
-  TagResult,
   SmartResponse,
   ServiceType,
   SaveModelConfigPayload
@@ -150,23 +149,6 @@ export function searchNodes(data: {
     results: SearchResult[]
     totalCount: number
   }>('/nodes/search', data)
-}
-
-// ==================== 自动标签 ====================
-
-/**
- * AI 提取节点关键词标签（耗时操作，超时 120 秒）
- */
-export function autoTag(data: {
-  nodeIds: string[]
-  mapId?: string
-  modelSelection?: string
-  serviceType?: ServiceType
-}) {
-  return postWithLongTimeout<{
-    results: TagResult[]
-    message: string
-  }>('/ai/build/tag', '/ai/tag', data)
 }
 
 // ==================== 智能缓冲层 ====================

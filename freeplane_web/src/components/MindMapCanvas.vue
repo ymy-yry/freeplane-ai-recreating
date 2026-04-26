@@ -8,6 +8,7 @@
 		:max-zoom="2"
 		@node-double-click="handleDoubleClick"
 		@node-click="handleNodeClick"
+		@node-drag-stop="handleNodeDragStop"
 		:nodes-draggable="true"
 		:edges-updatable="false"
 		:connection-line-style="{ stroke: '#94a3b8', strokeWidth: 1.5 }"
@@ -40,9 +41,9 @@
   
 	  <Toolbar :vue-flow="vueFlow" />
 
-	  <AiAutoPanel :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
-	  <AiChatPanel :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
-	  <AiBuildPanel :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
+	  <AiAutoPanel v-if="aiStore.panelVisible" :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
+	  <AiChatPanel v-if="aiStore.panelVisible" :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
+	  <AiBuildPanel v-if="aiStore.panelVisible" :map-id="store.currentMap?.mapId" :selected-node-id="selectedNodeId" />
 	  <NodeContextMenu
 		:visible="contextMenu.visible"
 		:x="contextMenu.x"
@@ -85,6 +86,14 @@
   const edges = ref<Edge[]>([])
   const selectedNodeId = ref<string>('')
   
+  // 拖拽位置缓存：以 mapId + nodeId 为 key，轮询刷新时优先恢复用户拖拽位置
+  const dragPositionCache = ref<Record<string, { x: number; y: number }>>({})
+  
+  const getCacheKey = (nodeId: string) => {
+	const mapId = store.currentMap?.mapId || 'default'
+	return `${mapId}::${nodeId}`
+  }
+  
   const editPanel = ref({ visible: false, nodeId: '', text: '' })
   
   const actionModal = ref({
@@ -101,49 +110,42 @@
 	nodeId: ''
   })
   
-  // **加强版更新**：每次都生成全新 nodes/edges 数组 + 控制 fitView 行为
+  // **加强版更新**：每次都生成全新 nodes/edges 数组 + 拖拽位置缓存恢复
   const updateFlow = async () => {
 	if (!store.currentMap?.root) return
 
 	const { nodes: newNodes, edges: newEdges } = treeToFlow(store.currentMap.root)
 
-	// 使用自动布局后的坐标，保证结构稳定、可读性更高
+	const prevCount = nodes.value.length
+
+	// 轮询刷新时优先恢复用户拖拽位置；首次加载或节点数变化时使用布局坐标
 	nodes.value = newNodes.map((node) => {
-	  // 检查节点是否被选中
-	  const isSelected = node.id === selectedNodeId.value;
-	  
-	  // 创建基本节点对象
-	  const updatedNode = { ...node, selected: isSelected };
-	  
-	  // 如果节点被选中，增强边框样式
-	  if (isSelected) {
-		// 修改节点的样式以加深边框
-		if (updatedNode.style) {
-		  updatedNode.style = {
-			...updatedNode.style,
-			border: '3px solid #1e3a8a', // 深蓝色边框表示选中状态
-			boxShadow: '0 0 0 2px rgba(30, 58, 138, 0.3), ' + (updatedNode.style.boxShadow || '0 1px 3px rgba(15, 23, 42, 0.06)')
-		  };
-		}
-	  }
-	  
-	  return updatedNode;
-	});
+	  const isSelected = node.id === selectedNodeId.value
+	  const cacheKey = getCacheKey(node.id)
+	  const cachedPos = dragPositionCache.value[cacheKey]
+	  const position = cachedPos ?? node.position
+	  const baseStyle = typeof node.style === 'object' && node.style !== null ? node.style as Record<string, unknown> : {}
+	  const style = isSelected
+		? { ...(baseStyle as any), border: '3px solid #1e3a8a', boxShadow: '0 0 0 2px rgba(30,58,138,0.3)' }
+		: (baseStyle as any)
+	  return { ...node, position, selected: isSelected, style }
+	})
+
 	if (selectedNodeId.value && !nodes.value.some((node) => node.id === selectedNodeId.value)) {
 	  selectedNodeId.value = ''
 	}
 	edges.value = [...newEdges]
 
-	// 刷新布局但不强制居中，仅在必要时居中
 	await nextTick()
-	if (!vueFlow.getNodes().length || nodes.value.length !== vueFlow.getNodes().length) { // 如果是首次加载或节点数量变化很大，则居中
-		vueFlow.fitView({ padding: 0.15, duration: 200 })
+	// 首次加载或节点数量变化时才居中，否则保持当前视图
+	if (prevCount === 0 || nodes.value.length !== prevCount) {
+	  vueFlow.fitView({ padding: 0.15, duration: 200 })
 	}
-	// 否则只更新节点而不改变视图位置，这样就不会影响当前视图位置
   }
   
   const updateSelectedNodeId = () => {
-	const selected = vueFlow.nodes.value.find((n: any) => n.selected)
+	const allNodes: any[] = (vueFlow.nodes as any)
+	const selected = Array.isArray(allNodes) ? allNodes.find((n: any) => n.selected) : undefined
 	selectedNodeId.value = selected?.id || ''
   }
 
@@ -152,12 +154,21 @@
 	selectedNodeId.value = event.node.id
   }
 
+  // 节点拖拽结束时，将最新位置写入缓存以防止轮询刷新时回弹
+  const handleNodeDragStop = (event: any) => {
+	const node = event?.node
+	if (!node?.id || !node?.position) return
+	const cacheKey = getCacheKey(node.id)
+	dragPositionCache.value[cacheKey] = { x: node.position.x, y: node.position.y }
+  }
+
   const isEditableTarget = (target: EventTarget | null) => {
 	if (!(target instanceof HTMLElement)) return false
 	const tagName = target.tagName
 	return (
 	  tagName === 'INPUT' ||
 	  tagName === 'TEXTAREA' ||
+	  tagName === 'SELECT' ||
 	  target.isContentEditable ||
 	  !!target.closest('[contenteditable="true"]')
 	)
@@ -222,12 +233,14 @@
   }
   
   const handleDelete = () => {
-	if (actionModal.mode === 'choose') {
+	const currentMode = actionModal.value.mode
+	const currentTargetId = actionModal.value.targetNodeId
+	if (currentMode === 'choose') {
 	  closeActionModal()
-	  actionModal.value = { visible: true, title: '删除节点', mode: 'delete', targetNodeId: actionModal.value.targetNodeId }
-	} else if (actionModal.mode === 'delete') {
-	  if (actionModal.value.targetNodeId) {
-		store.deleteNode(actionModal.value.targetNodeId)
+	  actionModal.value = { visible: true, title: '删除节点', mode: 'delete', targetNodeId: currentTargetId }
+	} else if (currentMode === 'delete') {
+	  if (currentTargetId) {
+		store.deleteNode(currentTargetId)
 	  }
 	  closeActionModal()
 	}

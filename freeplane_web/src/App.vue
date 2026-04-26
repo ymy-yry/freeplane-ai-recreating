@@ -9,6 +9,16 @@
   </script>
   
   <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  #app { height: 100vh; width: 100vw; overflow: hidden; font-family: system-ui, sans-serif; }
+  * { 
+	margin: 0; 
+	padding: 0; 
+	box-sizing: border-box; 
+  }
+  
+  #app { 
+	height: 100vh; 
+	width: 100vw; 
+	overflow: hidden; 
+	font-family: system-ui, sans-serif; 
+  }
   </style>

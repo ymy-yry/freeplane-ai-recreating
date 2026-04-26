@@ -249,7 +249,7 @@ export const useAIStore = defineStore('ai', () => {
       buildResult.value = resultText
       buildResultStatus.value = 'ready'
 
-      // 自动解析 JSON 并创建子节点
+      // 自动解析 JSON 并递归创建所有子节点（含嵌套子节点）
       if (resultText && data.nodeId) {
         const mapStore = useMapStore()
         const children = parseExpandResult(resultText)
@@ -295,9 +295,11 @@ export const useAIStore = defineStore('ai', () => {
 
   const createNodesRecursive = async (parentId: string, nodes: TreeNode[], mapStore: ReturnType<typeof useMapStore>) => {
     for (const node of nodes) {
-      await mapStore.createNode(parentId, node.text)
-      // 注意：createNode 返回 void，暂不支持深层嵌套创建
-      // 如需深层嵌套，需要 mapStore.createNode 返回新节点ID
+      const newId = await mapStore.createNode(parentId, node.text)
+      // 递归创建子节点：利用 createNode 返回的新节点 ID 作为下一层的 parentId
+      if (node.children && node.children.length > 0 && newId) {
+        await createNodesRecursive(newId, node.children, mapStore)
+      }
     }
   }
 
@@ -324,30 +326,6 @@ export const useAIStore = defineStore('ai', () => {
     }
   }
   
-  const tagNodes = async (data: { mapId?: string; nodeIds: string[] }) => {
-    try {
-      buildLoading.value = true
-      buildResultStatus.value = 'loading'
-      lastError.value = ''
-      const res = await aiApi.autoTag({
-        ...data,
-        modelSelection: currentModel.value,
-        serviceType: serviceType.value
-      })
-      const first = res.data.results?.[0]
-      buildResult.value = first?.result || res.data.message || ''
-      buildResultStatus.value = 'ready'
-      const mapStore = useMapStore()
-      await mapStore.loadMap()
-      return res.data
-    } catch (error: any) {
-      lastError.value = error?.message || '自动标签失败'
-      throw error
-    } finally {
-      buildLoading.value = false
-    }
-  }
-
   const generateMindMap = async (topic: string, options?: { maxDepth?: number }) => {
     try {
       buildLoading.value = true
@@ -401,9 +379,8 @@ export const useAIStore = defineStore('ai', () => {
       throw new Error('结果中未解析到可应用的节点，请确保 AI 返回 JSON 数组或 children 结构')
     }
 
-    for (const node of treeNodes) {
-      await mapStore.createNode(targetNodeId, node.text)
-    }
+    // 递归创建所有层级的节点
+    await createNodesRecursive(targetNodeId, treeNodes, mapStore)
     if (mapId) {
       await mapStore.loadMap()
     }
@@ -535,9 +512,8 @@ export const useAIStore = defineStore('ai', () => {
     init,
     expandNode,
     summarize,
-    tagNodes,
-    keywordSearch,
     generateMindMap,
+    keywordSearch,
     sendSmart,
     saveCustomModel,
     applyBuildResultToMap,

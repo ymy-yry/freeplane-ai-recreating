@@ -67,17 +67,6 @@ export interface SearchResult {
 }
 
 /**
- * 标签结果
- */
-export interface TagResult {
-  nodeId?: string
-  nodeIds?: string[]
-  tags?: string[]
-  result?: string
-  tokenUsage?: TokenUsage
-}
-
-/**
  * 智能缓冲层响应
  */
 export interface SmartResponse {
