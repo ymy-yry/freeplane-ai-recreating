@@ -18,7 +18,7 @@ public class BuildTaskScheduler {
     private final BlockingQueue<BuildTask> taskQueue;
     // 运行中的任务
     private final Set<BuildTask> runningTasks;
-    // 执行线程池
+    // 执行线程池（内部暴露以使 BuildTaskExecutor 复用）
     private final ExecutorService executorService;
     // 调度线程池
     private final ScheduledExecutorService schedulerService;
@@ -28,6 +28,8 @@ public class BuildTaskScheduler {
     private final BuildTaskExecutor taskExecutor;
     // 随机数生成器
     private final Random random;
+    // 任务超时（秒）：AI 操作耗时较长，默认 120 秒
+    private static final long TASK_TIMEOUT_SECONDS = 120;
 
     // 运行状态
     private volatile boolean running;
@@ -115,7 +117,7 @@ public class BuildTaskScheduler {
      * 提交任务到调度器
      * @param action 操作类型
      * @param request 请求参数
-     * @return 任务对象
+     * @return 任务对象，队列满时返回状态为 CANCELLED 的任务
      */
     public BuildTask submitTask(String action, Map<String, Object> request) {
         BuildTask task = new BuildTask(action, request, taskCounter.incrementAndGet());
@@ -123,6 +125,9 @@ public class BuildTaskScheduler {
         if (offered) {
             LogUtils.info("BuildTaskScheduler: 提交任务: " + task.getId() + ", action: " + action + ", queueSize: " + taskQueue.size());
         } else {
+            // 队列已满：标记为 CANCELLED 并通过 future 返回错误，而非静默丢弃
+            task.setStatus(BuildTask.TaskStatus.CANCELLED);
+            task.getFuture().complete(org.freeplane.plugin.ai.service.AIServiceResponse.error("调度器队列已满，请稍后重试"));
             LogUtils.warn("BuildTaskScheduler: 提交任务失败，队列已满");
         }
         return task;
@@ -167,11 +172,26 @@ public class BuildTaskScheduler {
                 LogUtils.info("BuildTaskScheduler: 任务完成: " + nextTask.getId());
             } catch (Exception e) {
                 nextTask.setStatus(BuildTask.TaskStatus.FAILED);
+                if (!nextTask.getFuture().isDone()) {
+                    nextTask.getFuture().complete(
+                        org.freeplane.plugin.ai.service.AIServiceResponse.error("任务执行失败: " + e.getMessage()));
+                }
                 LogUtils.warn("BuildTaskScheduler: 任务失败: " + nextTask.getId(), e);
             } finally {
                 runningTasks.remove(nextTask);
             }
         });
+
+        // 超时看门狗：若 TASK_TIMEOUT_SECONDS 秒内 future 仍未完成，则强制终止
+        schedulerService.schedule(() -> {
+            if (!nextTask.getFuture().isDone()) {
+                nextTask.setStatus(BuildTask.TaskStatus.FAILED);
+                nextTask.getFuture().complete(
+                    org.freeplane.plugin.ai.service.AIServiceResponse.error("任务超时（" + TASK_TIMEOUT_SECONDS + "秒）"));
+                runningTasks.remove(nextTask);
+                LogUtils.warn("BuildTaskScheduler: 任务超时并被强制终止: " + nextTask.getId());
+            }
+        }, TASK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     /**
@@ -203,6 +223,14 @@ public class BuildTaskScheduler {
         }
 
         return selectedTask;
+    }
+
+    /**
+     * 获取内部执行线程池（供 BuildTaskExecutor 复用）
+     * @return 执行线程池
+     */
+    public ExecutorService getExecutorService() {
+        return executorService;
     }
 
     /**

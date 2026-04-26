@@ -23,10 +23,12 @@ public class SchedulingMonitor {
     
     // 资源利用率
     private final AtomicLong peakConcurrentTasks;
-    private final List<ResourceUsageSnapshot> resourceSnapshots;
+    // 使用 ArrayDeque 作为有界循环缓冲区，removeFirst() 为 O(1)，替代 ArrayList.remove(0) 的 O(n)
+    private final ArrayDeque<ResourceUsageSnapshot> resourceSnapshots;
+    private static final int MAX_RESOURCE_SNAPSHOTS = 100;
     
-    // 参数影响
-    private final Map<String, List<ParameterImpact>> parameterImpacts;
+    // 参数影响（每个 action 最多保留 50 条，同样用 ArrayDeque）
+    private final Map<String, ArrayDeque<ParameterImpact>> parameterImpacts;
     
     private SchedulingMonitor() {
         this.taskMetricsByAction = new ConcurrentHashMap<>();
@@ -36,7 +38,7 @@ public class SchedulingMonitor {
         this.totalWaitTime = new AtomicLong(0);
         this.totalExecutionTime = new AtomicLong(0);
         this.peakConcurrentTasks = new AtomicLong(0);
-        this.resourceSnapshots = Collections.synchronizedList(new ArrayList<>());
+        this.resourceSnapshots = new ArrayDeque<>(MAX_RESOURCE_SNAPSHOTS);
         this.parameterImpacts = new ConcurrentHashMap<>();
     }
     
@@ -70,12 +72,16 @@ public class SchedulingMonitor {
         int runningTasks = BuildTaskScheduler.getInstance().getRunningTaskCount();
         long timestamp = System.currentTimeMillis();
         ResourceUsageSnapshot snapshot = new ResourceUsageSnapshot(timestamp, queueSize, runningTasks);
-        resourceSnapshots.add(snapshot);
-        if (resourceSnapshots.size() > 100) {
-            resourceSnapshots.remove(0);
+        synchronized (resourceSnapshots) {
+            resourceSnapshots.addLast(snapshot);
+            if (resourceSnapshots.size() > MAX_RESOURCE_SNAPSHOTS) {
+                resourceSnapshots.removeFirst(); // O(1)
+            }
         }
     }
     
+    private static final int MAX_PARAMETER_IMPACTS = 50;
+
     private void recordParameterImpact(BuildTask task, boolean success) {
         SchedulingConfig config = SchedulingConfig.getInstance();
         String action = task.getAction();
@@ -84,10 +90,12 @@ public class SchedulingMonitor {
             config.getTemperature(), config.getTopP(),
             task.getWaitTime(), task.getExecutionTime(), success
         );
-        parameterImpacts.computeIfAbsent(action, k -> new ArrayList<>()).add(impact);
-        List<ParameterImpact> impacts = parameterImpacts.get(action);
-        if (impacts.size() > 50) {
-            impacts.subList(0, impacts.size() - 50).clear();
+        ArrayDeque<ParameterImpact> impacts = parameterImpacts.computeIfAbsent(action, k -> new ArrayDeque<>(MAX_PARAMETER_IMPACTS));
+        synchronized (impacts) {
+            impacts.addLast(impact);
+            if (impacts.size() > MAX_PARAMETER_IMPACTS) {
+                impacts.removeFirst(); // O(1)
+            }
         }
     }
     
@@ -100,8 +108,17 @@ public class SchedulingMonitor {
         metrics.setTotalExecutionTime(totalExecutionTime.get());
         metrics.setPeakConcurrentTasks(peakConcurrentTasks.get());
         metrics.setTaskMetricsByAction(new HashMap<>(taskMetricsByAction));
-        metrics.setRecentResourceSnapshots(new ArrayList<>(resourceSnapshots));
-        metrics.setParameterImpacts(new HashMap<>(parameterImpacts));
+        synchronized (resourceSnapshots) {
+            metrics.setRecentResourceSnapshots(new ArrayList<>(resourceSnapshots));
+        }
+        // 快照 parameterImpacts 时对每个 deque 分别加锁
+        Map<String, List<ParameterImpact>> impactsCopy = new HashMap<>();
+        parameterImpacts.forEach((action, deque) -> {
+            synchronized (deque) {
+                impactsCopy.put(action, new ArrayList<>(deque));
+            }
+        });
+        metrics.setParameterImpacts(impactsCopy);
         return metrics;
     }
     
@@ -113,7 +130,9 @@ public class SchedulingMonitor {
         totalWaitTime.set(0);
         totalExecutionTime.set(0);
         peakConcurrentTasks.set(0);
-        resourceSnapshots.clear();
+        synchronized (resourceSnapshots) {
+            resourceSnapshots.clear();
+        }
         parameterImpacts.clear();
         LogUtils.info("SchedulingMonitor: 指标已重置");
     }
@@ -144,7 +163,7 @@ public class SchedulingMonitor {
         private long peakConcurrentTasks;
         private Map<String, TaskMetrics> taskMetricsByAction;
         private List<ResourceUsageSnapshot> recentResourceSnapshots;
-        private Map<String, List<ParameterImpact>> parameterImpacts;
+        private Map<String, List<ParameterImpact>> parameterImpacts; // 快照时已转为 List，外部只读
         
         public long getTotalTasks() { return totalTasks; }
         public void setTotalTasks(long totalTasks) { this.totalTasks = totalTasks; }

@@ -1,7 +1,10 @@
 package org.freeplane.plugin.ai.service.scheduling;
 
+import org.freeplane.plugin.ai.service.AIServiceResponse;
+
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 构建任务类 - 表示具有优先级和元数据的构建任务
@@ -27,6 +30,8 @@ public class BuildTask {
     private long completedAt;
     // 优先级分数
     private double priorityScore;
+    // 异步结果：调度器执行完任务后通过此 future 回传结调用方
+    private final CompletableFuture<AIServiceResponse> future;
 
     /**
      * 构造任务对象
@@ -52,6 +57,7 @@ public class BuildTask {
         this.status = TaskStatus.PENDING;
         this.priority = calculateBasePriority(action);
         this.priorityScore = priority;
+        this.future = new CompletableFuture<>();
     }
 
     /**
@@ -135,6 +141,14 @@ public class BuildTask {
     }
 
     /**
+     * 获取异步结果 Future。调用方可通过 future.get(timeout) 等待任务完成。
+     * @return CompletableFuture
+     */
+    public CompletableFuture<AIServiceResponse> getFuture() {
+        return future;
+    }
+
+    /**
      * 获取任务等待时间
      * @return 等待时间（毫秒）
      */
@@ -180,6 +194,7 @@ public class BuildTask {
         PENDING,    // 待处理
         RUNNING,    // 运行中
         COMPLETED,  // 已完成
-        FAILED      // 失败
+        FAILED,     // 失败
+        CANCELLED   // 已取消（队列满、超时、主动取消）
     }
 }

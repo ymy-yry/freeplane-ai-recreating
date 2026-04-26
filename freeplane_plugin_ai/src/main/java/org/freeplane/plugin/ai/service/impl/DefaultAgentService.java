@@ -20,6 +20,8 @@ import org.freeplane.plugin.ai.service.scheduling.BuildTask;
 import org.freeplane.plugin.ai.service.scheduling.BuildTaskScheduler;
 import org.freeplane.plugin.ai.service.scheduling.SchedulingConfig;
 import org.freeplane.plugin.ai.service.scheduling.SchedulingMonitor;
+
+import java.util.concurrent.TimeUnit;
 import org.freeplane.plugin.ai.tools.AIToolSet;
 import org.freeplane.plugin.ai.tools.AIToolSetBuilder;
 import org.freeplane.plugin.ai.tools.utilities.ToolCallSummaryHandler;
@@ -103,47 +105,52 @@ public class DefaultAgentService implements AIService {
                 return AIServiceResponse.error("Action is required");
             }
 
-            // Check if scheduling is enabled
+            // 调度器已启用：将任务提交并通过 future 异步等待结果
             if (schedulingConfig != null && schedulingConfig.isEnabled() && taskScheduler != null) {
-                // Use scheduler for build tasks
                 BuildTask task = taskScheduler.submitTask(action, request);
-                
-                // For now, we'll still process synchronously for compatibility
-                // In a real implementation, this would return a task ID and use async processing
-                switch (action) {
-                    case "generate-mindmap":
-                        return handleGenerateMindMap(request);
-                    case "expand-node":
-                        return handleExpandNode(request);
-                    case "summarize":
-                        return handleSummarize(request);
-                    case "tag":
-                        return handleTag(request);
-                    case "execute-tool":
-                        return handleExecuteTool(request);
-                    default:
-                        return AIServiceResponse.error("Unknown action: " + action);
+                // 队列已满时直接返回 CANCELLED 结果
+                if (task.getStatus() == BuildTask.TaskStatus.CANCELLED) {
+                    return task.getFuture().getNow(AIServiceResponse.error("调度器队列已满"));
                 }
-            } else {
-                // Fallback to direct processing if scheduling is disabled
-                switch (action) {
-                    case "generate-mindmap":
-                        return handleGenerateMindMap(request);
-                    case "expand-node":
-                        return handleExpandNode(request);
-                    case "summarize":
-                        return handleSummarize(request);
-                    case "tag":
-                        return handleTag(request);
-                    case "execute-tool":
-                        return handleExecuteTool(request);
-                    default:
-                        return AIServiceResponse.error("Unknown action: " + action);
-                }
+                // 等待任务执行完成，最长等待 120 秒
+                return task.getFuture().get(120, TimeUnit.SECONDS);
             }
+
+            // 调度器未启用：直接执行
+            return dispatchAction(action, request);
+        } catch (java.util.concurrent.TimeoutException e) {
+            LogUtils.warn("DefaultAgentService.processRequest 等待任务超时", e);
+            return AIServiceResponse.error("Agent action timed out after 120s");
+        } catch (java.util.concurrent.ExecutionException e) {
+            LogUtils.warn("DefaultAgentService.processRequest 任务执行异常", e);
+            return AIServiceResponse.error("Agent action failed: " + e.getCause().getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return AIServiceResponse.error("Agent action interrupted");
         } catch (Exception e) {
             LogUtils.warn("DefaultAgentService.processRequest failed", e);
             return AIServiceResponse.error("Agent action failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 按 action 类型分发到具体 handler。
+     * public 以便跨包访问（BuildTaskExecutor 直接调用，避免再次进入调度路径防死锁）。
+     */
+    public AIServiceResponse dispatchAction(String action, Map<String, Object> request) {
+        switch (action) {
+            case "generate-mindmap":
+                return handleGenerateMindMap(request);
+            case "expand-node":
+                return handleExpandNode(request);
+            case "summarize":
+                return handleSummarize(request);
+            case "tag":
+                return handleTag(request);
+            case "execute-tool":
+                return handleExecuteTool(request);
+            default:
+                return AIServiceResponse.error("Unknown action: " + action);
         }
     }
 
@@ -349,6 +356,14 @@ public class DefaultAgentService implements AIService {
             LogUtils.warn("DefaultAgentService.handleTag failed", e);
             return AIServiceResponse.error("Failed to generate tags: " + e.getMessage());
         }
+    }
+
+    /**
+     * 供 BuildTaskExecutor 调用，确保 agent 已完成初始化。
+     * public 以便跨包访问（scheduling 包需要调用）。
+     */
+    public void ensureAgentInitializedPublic() {
+        ensureAgentInitialized();
     }
 
     private void ensureAgentInitialized() {
