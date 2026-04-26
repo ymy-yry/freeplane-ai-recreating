@@ -8,10 +8,14 @@
 
     <section class="card">
       <div class="card-title">生成思维导图</div>
-      <input v-model="topic" placeholder="输入主题" />
+      <input v-model="topic" placeholder="输入主题" @input="showCacheDuplicateWarning = false" />
+      <div class="cache-hint">
+        <span class="cache-hint-icon">💡</span>
+        系统会缓存相同请求的结果。如需生成不同内容，请修改主题或调整深度。
+      </div>
       <div class="row">
         <label>深度</label>
-        <select v-model.number="maxDepth">
+        <select v-model.number="maxDepth" @change="showCacheDuplicateWarning = false">
           <option :value="1">1 层</option>
           <option :value="2">2 层</option>
           <option :value="3">3 层</option>
@@ -20,6 +24,9 @@
           <option :value="6">6 层</option>
         </select>
         <button :disabled="aiStore.buildLoading || !topic.trim()" @click="runGenerate">一键生成</button>
+      </div>
+      <div v-if="showCacheDuplicateWarning" class="cache-warning">
+        ⚠️ 主题与深度与上次完全相同，将直接返回缓存结果。若需重新生成，请修改主题内容或调整深度。
       </div>
       <div v-if="generateError" class="error-msg">{{ generateError }}</div>
     </section>
@@ -48,14 +55,6 @@
       </button>
     </section>
 
-    <section class="card">
-      <div class="card-title">自动标签</div>
-      <div class="node">当前节点: {{ selectedNodeId || '请先选中节点' }}</div>
-      <button :disabled="aiStore.buildLoading || !selectedNodeId" @click="runTag">
-        {{ aiStore.buildLoading ? '处理中...' : '批量打标签' }}
-      </button>
-    </section>
-
     <section class="result">
       <div class="result-title">结果预览</div>
       <div class="result-status">
@@ -80,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useAIStore } from '@/stores/aiStore'
 import ModelSelector from '@/components/ai/ModelSelector.vue'
 import ModelConfigPanel from '@/components/ai/ModelConfigPanel.vue'
@@ -96,11 +95,28 @@ const topic = ref('')
 const maxDepth = ref(3)
 const expandCount = ref(5)
 const generateError = ref('')
+
+// 缓存提醒：记录上一次提交的 topic+depth 组合，用于判断是否重复输入
+const lastSubmittedKey = ref('')
+const showCacheDuplicateWarning = ref(false)
+
+const currentKey = computed(() => `${topic.value.trim()}|${maxDepth.value}`)
+
 let startX = 0
 let startWidth = 320
 
 const runGenerate = async () => {
   generateError.value = ''
+
+  // 检测是否与上次提交完全相同（触发缓存警告）
+  if (lastSubmittedKey.value && lastSubmittedKey.value === currentKey.value) {
+    showCacheDuplicateWarning.value = true
+  } else {
+    showCacheDuplicateWarning.value = false
+  }
+
+  lastSubmittedKey.value = currentKey.value
+
   try {
     await aiStore.generateMindMap(topic.value.trim(), { maxDepth: maxDepth.value })
   } catch (e: any) {
@@ -131,18 +147,6 @@ const runSummarize = async () => {
     })
   } catch (e: any) {
     generateError.value = e?.message || aiStore.lastError || '生成摘要失败'
-  }
-}
-
-const runTag = async () => {
-  if (!props.selectedNodeId) return
-  try {
-    await aiStore.tagNodes({
-      mapId: props.mapId,
-      nodeIds: [props.selectedNodeId]
-    })
-  } catch (e: any) {
-    generateError.value = e?.message || aiStore.lastError || '批量打标签失败'
   }
 }
 
@@ -195,6 +199,9 @@ button { border: 1px solid #2563eb; background: #2563eb; color: #fff; border-rad
 button:disabled { opacity: 0.6; cursor: not-allowed; }
 .node { font-size: 12px; color: #4b5563; }
 .error-msg { font-size: 12px; color: #dc2626; margin-top: 4px; }
+.cache-hint { font-size: 11px; color: #6b7280; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; display: flex; align-items: flex-start; gap: 4px; line-height: 1.5; }
+.cache-hint-icon { flex-shrink: 0; }
+.cache-warning { font-size: 12px; color: #92400e; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; padding: 7px 9px; line-height: 1.5; margin-top: 2px; }
 .result { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; min-height: 120px; }
 .result-title { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
 .result-status { font-size: 12px; color: #4b5563; margin-bottom: 6px; }
