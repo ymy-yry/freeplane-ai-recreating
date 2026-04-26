@@ -1,4 +1,6 @@
-# AI 返回自我介绍问题排查报告
+# AI 插件问题排查与修复总结
+
+> 本文档记录从项目调试过程中发现并修复的所有关键问题，包含根因分析和修复方法。
 
 ## 现象描述
 
@@ -143,3 +145,115 @@ ChatResponse chatResponse = chatModel.chat(chatRequest);
    - 如果通过菜单"AI → 生成思维导图"触发 → 走 buffer 层路径
    - 如果在 AI chat 面板输入文字发送 → 走 `AIChatService` 路径（受 `MessageBuilder.buildForChat()` 影响）
    - 如果通过 Vue 前端触发 → 走 REST API 路径（`DefaultAgentService`）
+
+---
+
+## 问题 5：prompts.properties 中文编码与多行格式
+
+### 5.1 历史背景与误区
+
+`Properties.load(InputStream)` 诞生于 Java 1.1（1997年），强制使用 ISO-8859-1 编码，中文必须转义为 `\uXXXX`。
+
+JDK 1.6（2006年）新增了 `Properties.load(Reader)` 方法，传入 `InputStreamReader(UTF-8)` 就可以**直接写中文**，无需转义。
+
+### 5.2 我们项目的实际加载方式
+
+`MindMapPromptOptimizer.loadTemplates()` 第 29 行已使用 UTF-8：
+
+```java
+promptTemplates.load(new java.io.InputStreamReader(is, StandardCharsets.UTF_8));
+```
+
+**结论：`prompts.properties` 完全可以直接写中文，不需要 `\uXXXX` 转义。**
+
+### 5.3 真正的限制：Properties 格式的换行截断（与编码无关）
+
+无论用哪种编码加载，`.properties` 格式规定：每个键值对以换行符结束，除非行尾有 `\`（续行符）。
+
+```
+# 错误写法：第二行开始全部被截断
+mindmap.generation.zh=你是一位专业的思维导图专家。
+
+## 上下文（此行被忽略）
+主题：{topic}（此行被忽略）
+```
+
+### 5.4 两种正确写法
+
+**写法一：单行格式（当前已采用）**
+
+用 `\n` 表示换行，`Properties.load` 会自动解释为换行符：
+
+```properties
+mindmap.generation.zh=你是专业思维导图专家。\n请为主题"{topic}"生成 {maxDepth} 层结构。\n严格返回 JSON。
+```
+
+**写法二：多行 + `\` 续行符（可读性更好）**
+
+中文直接写，每行末尾加 `\`：
+
+```properties
+mindmap.generation.zh=\
+  你是专业思维导图专家。\n\
+  请为主题"{topic}"生成 {maxDepth} 层完整结构。\n\
+  要求：每个节点内容具体有价值，分支逻辑关联，使用中文。\n\
+  严格返回 JSON，不含 Markdown 标记。\n\
+  示例：{"text":"{topic}","children":[{"text":"分支1"},{"text":"分支2"}]}
+```
+
+关键规则：
+- 每行末尾 `\` 是续行符，告诉解析器下一行仍属于同一个键
+- `\n` 会被解释为换行，AI 收到的是带换行的多行文本
+- 最后一行末尾**不加** `\`
+- 中文直接写，因为加载方式已是 UTF-8
+
+---
+
+## 问题 6：lib/plugin-1.13.3.jar 未同步更新导致修复不生效
+
+### 根因
+
+`freeplane_plugin_ai-1.13.3.jar` 的 `MANIFEST.MF` 声明了 OSGi Bundle-ClassPath：
+
+```
+Bundle-ClassPath: ., lib/plugin-1.13.3.jar, lib/langchain4j-1.11.0.jar, ...
+```
+
+OSGi 加载 class 时，实际从 `lib/plugin-1.13.3.jar` 中读取业务代码。每次只更新 `freeplane_plugin_ai-1.13.3.jar` 而不更新 `lib/plugin-1.13.3.jar`，导致旧 class 一直被使用，修复代码永远不生效。
+
+### 修复方法
+
+每次编译后，同时更新两个位置：
+
+```powershell
+$jar = Get-ChildItem "freeplane_plugin_ai\build\libs\*.jar" | Select-Object -First 1
+Copy-Item $jar.FullName "BIN\plugins\org.freeplane.plugin.ai\"
+Copy-Item $jar.FullName "BIN\plugins\org.freeplane.plugin.ai\lib\plugin-1.13.3.jar" -Force
+```
+
+---
+
+## 问题 7：前端 smartRequest 超时 30 秒导致请求失败
+
+### 根因
+
+`freeplane_web/src/api/aiApi.ts` 中 `smartRequest` 使用 `postWithFallback`（基础 axios 实例，超时 30 秒），而 AI 生成思维导图实际需要 40~60 秒，导致前端报超时错误，但后端已成功处理完成。
+
+### 修复方法
+
+将 `smartRequest` 改用 `postWithLongTimeout`（120 秒超时实例）：
+
+```typescript
+// 修复前
+export function smartRequest(data) {
+  return postWithFallback('/ai/chat/smart', '/ai/smart', data)
+}
+
+// 修复后
+export function smartRequest(data) {
+  return postWithLongTimeout('/ai/chat/smart', '/ai/smart', data)
+}
+```
+
+**文件**：`freeplane_web/src/api/aiApi.ts`
+
