@@ -266,3 +266,6 @@ gradle-app.setting
 # Local testing scripts
 test_encryption_quick.sh
 .classpath_cache
+
+# Build artifacts
+freeplane_plugin_ai/*.zip
