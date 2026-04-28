@@ -1,10 +1,14 @@
 package org.freeplane.plugin.ai.chat;
 
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.googleai.GeminiThinkingConfig;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
+import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import java.util.Map;
 
 public class AIChatModelFactory {
@@ -93,6 +97,73 @@ public class AIChatModelFactory {
                 .build();
         }
         throw new IllegalArgumentException("Unknown provider name: " + providerName);
+    }
+
+    /**
+     * Creates a {@link StreamingChatModel} for the given provider configuration.
+     * Returns {@code null} when streaming is not supported for the selected provider.
+     */
+    public static StreamingChatModel createStreamingChatModel(AIProviderConfiguration configuration) {
+        AIModelSelection selection = AIModelSelection.fromSelectionValue(configuration.getSelectedModelValue());
+        if (selection == null) {
+            return null;
+        }
+        String providerName = selection.getProviderName();
+        String modelName = selection.getModelName();
+        try {
+            if (PROVIDER_NAME_OPENROUTER.equalsIgnoreCase(providerName)) {
+                return OpenAiStreamingChatModel.builder()
+                    .baseUrl(getOpenrouterServiceAddress(configuration))
+                    .apiKey(configuration.getOpenRouterKey())
+                    .modelName(modelName)
+                    .build();
+            }
+            if (PROVIDER_NAME_GEMINI.equalsIgnoreCase(providerName)) {
+                GoogleAiGeminiStreamingChatModel.GoogleAiGeminiStreamingChatModelBuilder builder =
+                    GoogleAiGeminiStreamingChatModel.builder()
+                        .apiKey(configuration.getGeminiKey())
+                        .modelName(modelName);
+                String serviceAddress = configuration.getGeminiServiceAddress();
+                if (serviceAddress != null && !serviceAddress.isEmpty()) {
+                    builder.baseUrl(serviceAddress);
+                }
+                return builder.build();
+            }
+            if (PROVIDER_NAME_OLLAMA.equalsIgnoreCase(providerName)) {
+                OllamaStreamingChatModel.OllamaStreamingChatModelBuilder builder = OllamaStreamingChatModel.builder()
+                    .baseUrl(getOllamaServiceAddress(configuration))
+                    .modelName(modelName);
+                Map<String, String> requestHeaders = configuration.getOllamaRequestHeaders();
+                if (!requestHeaders.isEmpty()) {
+                    builder.customHeaders(requestHeaders);
+                }
+                return builder.build();
+            }
+            if (PROVIDER_NAME_DASHSCOPE.equalsIgnoreCase(providerName)) {
+                return OpenAiStreamingChatModel.builder()
+                    .baseUrl(getDashScopeServiceAddress(configuration))
+                    .apiKey(configuration.getDashScopeKey())
+                    .modelName(modelName)
+                    .build();
+            }
+            if (PROVIDER_NAME_ERNIE.equalsIgnoreCase(providerName)) {
+                String serviceAddress = configuration.getErnieServiceAddress();
+                if (serviceAddress == null || serviceAddress.isEmpty()) {
+                    serviceAddress = "https://qianfan.baidubce.com/v2";
+                } else if (serviceAddress.endsWith("/chat/completions")) {
+                    serviceAddress = serviceAddress.substring(0, serviceAddress.length() - "/chat/completions".length());
+                }
+                return OpenAiStreamingChatModel.builder()
+                    .baseUrl(serviceAddress)
+                    .apiKey(configuration.getErnieKey())
+                    .modelName(modelName)
+                    .build();
+            }
+        } catch (Exception e) {
+            // Streaming model creation failed; fallback to non-streaming
+            return null;
+        }
+        return null;
     }
 
     private static String getOpenrouterServiceAddress(AIProviderConfiguration configuration) {

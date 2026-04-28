@@ -19,6 +19,7 @@ import java.io.IOException;
  *   GET  /api/maps                  → MapRestController.handleGetAllMaps
  *   POST /api/maps/create           → MapRestController.handleCreateMap
  *   POST /api/maps/switch           → MapRestController.handleSwitchMap
+ *   POST /api/maps/import           → MapRestController.handleImportMap
  *   GET  /api/maps/{id}             → MapRestController.handleGetMapById
  *   GET  /api/nodes/{id}            → MapRestController.handleGetNode
  *   POST /api/nodes/search          → NodeRestController.handleSearch
@@ -27,11 +28,14 @@ import java.io.IOException;
  *   POST /api/nodes/delete          → NodeRestController.handleDelete
  *   GET  /api/ai/chat/models        → AiRestController.handleGetModels
  *   POST /api/ai/chat/message       → AiRestController.handleChat
+ *   POST /api/ai/chat/stream        → AiRestController.handleChatStream
  *   POST /api/ai/chat/smart         → AiRestController.handleSmartRequest
  *   POST /api/ai/build/expand-node  → AiRestController.handleExpandNode
  *   POST /api/ai/build/summarize    → AiRestController.handleSummarize
+ *   POST /api/ai/build/summarize-stream → AiRestController.handleSummarizeStream
  *   POST /api/ai/build/generate-mindmap → AiRestController.handleGenerateMindMap
  *   POST /api/ai/build/tag          → AiRestController.handleTag
+ *   POST /api/ai/config/save        → AiRestController.handleSaveConfig
  */
 public class RestApiRouter {
 
@@ -102,6 +106,9 @@ public class RestApiRouter {
                             break;
                         case "/api/maps/switch":
                             mapController.handleSwitchMap(exchange);
+                            break;
+                        case "/api/maps/import":
+                            mapController.handleImportMap(exchange);
                             break;
                         default:
                             sendNotFound(exchange);
@@ -177,6 +184,9 @@ public class RestApiRouter {
                         case "/api/ai/chat/message":
                             aiController.handleChat(exchange);
                             break;
+                        case "/api/ai/chat/stream":
+                            aiController.handleChatStream(exchange);
+                            break;
                         case "/api/ai/chat/smart":
                             aiController.handleSmartRequest(exchange);
                             break;
@@ -189,8 +199,14 @@ public class RestApiRouter {
                         case "/api/ai/build/summarize":
                             aiController.handleSummarize(exchange);
                             break;
+                        case "/api/ai/build/summarize-stream":
+                            aiController.handleSummarizeStream(exchange);
+                            break;
                         case "/api/ai/build/tag":
                             aiController.handleTag(exchange);
+                            break;
+                        case "/api/ai/config/save":
+                            aiController.handleSaveConfig(exchange);
                             break;
                         default:
                             sendNotFound(exchange);

@@ -13,7 +13,7 @@ import java.util.concurrent.ExecutorService;
  *
  * <h3>核心设计</h3>
  * <p>解析阶段采用"蛇吞蛋"策略：Jackson 流式解析时只提取节点 id/text/childIds
- * 三类"蛋液"写入轻量邻接表 {@link GraphData}，JsonNode 对象（"蛋壳"）
+ * 三类"蛋液"写入轻量邻接表 {@link SnakeDigestGraph}，JsonNode 对象（"蛋壳"）
  * 在离开作用域后即可被 GC 回收，全程不实例化 {@link MindMapNode} 对象。
  *
  * <p>所有验证（环检测、唯一性、深度、子数、统计）均在邻接表字符串结构上完成，
@@ -57,9 +57,9 @@ public class MindMapGenerationValidator {
      *
      * <p>内部流程：
      * <ol>
-     *   <li>Jackson 解析 JSON 并构建轻量 {@link GraphData}（蛇吞蛋）</li>
-     *   <li>JsonNode 对象树在方法返回后可被 GC 回收（吓出蛋壳）</li>
-     *   <li>所有验证在 GraphData 字符串相邻接表上完成</li>
+     *   <li>Jackson 解析 JSON 并构建轻量 {@link SnakeDigestGraph}（蛇吞蛋）</li>
+     *   <li>JsonNode 对象树在方法返回后可被 GC 回收（吐出蛋壳）</li>
+     *   <li>所有验证在 SnakeDigestGraph 邻接表上完成</li>
      * </ol>
      *
      * @param jsonResponse LLM 生成的思维导图 JSON
@@ -75,8 +75,8 @@ public class MindMapGenerationValidator {
 
         try {
             // ① "蛇吞蛋"：Jackson 解析 → 提取邻接表 → JsonNode 树可 GC
-            GraphData graph = buildGraph(jsonResponse);
-            if (graph.rootId == null) {
+            SnakeDigestGraph graph = buildGraph(jsonResponse);
+            if (graph.getRootId() == null) {
                 result.addError("NULL_ROOT", "解析后的根节点为空");
                 return result;
             }
@@ -130,34 +130,7 @@ public class MindMapGenerationValidator {
     }
 
     // -------------------------------------------------------------------------
-    // 核心数据结构：GraphData 邻接表（“蛋液”容器）
-    // -------------------------------------------------------------------------
-
-    /**
-     * 解析阶段的内部数据容器。
-     * 只保留验证所需的最小信息，不引入任何完整节点对象。
-     */
-    private static final class GraphData {
-        /** 根节点 ID */
-        String rootId;
-        /** 节点 ID → 子节点 ID 列表（保序） */
-        final Map<String, List<String>> adjacency = new LinkedHashMap<>();
-        /** 节点 ID → text（仅用于验证报告和根节点有效性检查） */
-        final Map<String, String> labels = new HashMap<>();
-
-        /** 给节点 ID 注册到邻接表（尚未进入时创建空子列表） */
-        void register(String id) {
-            adjacency.putIfAbsent(id, new ArrayList<>());
-        }
-
-        /** 添加有向边 parentId → childId */
-        void addEdge(String parentId, String childId) {
-            adjacency.computeIfAbsent(parentId, k -> new ArrayList<>()).add(childId);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // 解析阶段：Jackson 流式解析 → 直接输出 GraphData（“蛇吞蛋”核心）
+    // 解析阶段：Jackson 流式解析 → 直接输出 SnakeDigestGraph（"蛇吞蛋"核心）
     // -------------------------------------------------------------------------
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -172,7 +145,7 @@ public class MindMapGenerationValidator {
      *   <li>“吱出蛋壳”：{@code buildGraph} 返回后 JsonNode 局部引用消失，GC 可回收整棵对象树</li>
      * </ul>
      */
-    private GraphData buildGraph(String json) {
+    private SnakeDigestGraph buildGraph(String json) {
         String trimmed = json.trim();
         if (trimmed.startsWith("[")) {
             throw new IllegalArgumentException("根节点不能是数组，必须是 JSON 对象");
@@ -183,7 +156,8 @@ public class MindMapGenerationValidator {
             if (!rootNode.isObject()) {
                 throw new IllegalArgumentException("根节点必须是 JSON 对象");
             }
-            GraphData graph = new GraphData();
+            SnakeDigestGraph graph = new SnakeDigestGraph();
+            // "挠蛋液/吓蛋壳"：dfs 递归提取邻接表，JsonNode 逐步可 GC
             // 吴“挤蛋液）吱蛋壳”：dfs 递归提取邻接表，JsonNode 逐步可 GC
             traverseToGraph(rootNode, null, graph);
             // rootNode 局部引用在此处就要离开作用域 → GC 可回收整棵 JsonNode 树
@@ -197,7 +171,7 @@ public class MindMapGenerationValidator {
      * DFS 递归提取邻接表。
      * 每个 JsonNode 在提取完 id/text/children 后不再被引用，最终只有当前递归格上的节点存活。
      */
-    private void traverseToGraph(JsonNode node, String parentId, GraphData graph) {
+    private void traverseToGraph(JsonNode node, String parentId, SnakeDigestGraph graph) {
         // ① 提取“蛋液”：id 和 text
         JsonNode idNode = node.get("id");
         String id = (idNode != null && !idNode.isNull()) ? idNode.asText() : generateNodeId();
@@ -205,10 +179,9 @@ public class MindMapGenerationValidator {
         JsonNode textNode = node.get("text");
         String text = (textNode != null && !textNode.isNull()) ? textNode.asText() : "";
 
-        // ② 写入邻接表（“流入胃部”）
-        graph.register(id);
-        graph.labels.put(id, text);
-        if (graph.rootId == null) graph.rootId = id;
+        // ② 写入邻接表（"流入胃部"）
+        graph.registerNode(id, text);
+        graph.setRootId(id);
         if (parentId != null) graph.addEdge(parentId, id);
 
         // ③ 递归子节点（“继续吴入”）
@@ -225,10 +198,10 @@ public class MindMapGenerationValidator {
     }
 
     // -------------------------------------------------------------------------
-    // 验证阶段：所有检查均在 GraphData 上完成
+    // 验证阶段：所有检查均在 SnakeDigestGraph 上完成
     // -------------------------------------------------------------------------
 
-    private void validateGraph(GraphData graph, MindMapValidationResult result) {
+    private void validateGraph(SnakeDigestGraph graph, MindMapValidationResult result) {
         // 1. 根节点有效性
         validateRoot(graph, result);
 
@@ -264,9 +237,9 @@ public class MindMapGenerationValidator {
     // 1. 根节点有效性
     // -------------------------------------------------------------------------
 
-    private void validateRoot(GraphData graph, MindMapValidationResult result) {
-        String rootId = graph.rootId;
-        String text = graph.labels.getOrDefault(rootId, "");
+    private void validateRoot(SnakeDigestGraph graph, MindMapValidationResult result) {
+        String rootId = graph.getRootId();
+        String text = graph.getLabel(rootId != null ? rootId : "");
         boolean hasId = rootId != null && !rootId.startsWith("node_"); // 自动生成的 ID 不算“有效 ID”
         boolean hasText = text != null && !text.trim().isEmpty();
         if (!hasId && !hasText) {
@@ -282,9 +255,9 @@ public class MindMapGenerationValidator {
      * 检测同一 childId 是否被多个父节点引用（邻接表 key 不重复，
      * 但同一 childId 可能出现在多个父节点的 children 列表中）。
      */
-    private void checkDuplicateIds(GraphData graph, MindMapValidationResult result) {
+    private void checkDuplicateIds(SnakeDigestGraph graph, MindMapValidationResult result) {
         Set<String> allChildIds = new HashSet<>();
-        for (Map.Entry<String, List<String>> entry : graph.adjacency.entrySet()) {
+        for (Map.Entry<String, List<String>> entry : graph.adjacencyEntries()) {
             for (String childId : entry.getValue()) {
                 if (!allChildIds.add(childId)) {
                     result.addError("DUPLICATE_ID", "发现重复的节点 ID: " + childId, childId);
@@ -319,16 +292,15 @@ public class MindMapGenerationValidator {
         int internalNodes = 0;
     }
 
-    private void detectCyclesAndCollectStats(GraphData graph, GraphStats stats,
+    private void detectCyclesAndCollectStats(SnakeDigestGraph graph, GraphStats stats,
                                              MindMapValidationResult result) {
-        // color: 单 Map 代替 visited + recursionStack 两个 Set
-        Map<String, Integer> color = new HashMap<>(graph.adjacency.size() * 2);
-        // parent: 记录 DFS 树父节点，用于发现环时重建完整路径
-        Map<String, String> parent = new HashMap<>(graph.adjacency.size() * 2);
-        statsDFS(graph.rootId, graph, color, parent, 1, stats, result);
+        // color/parent 由 SnakeDigestGraph 按节点数预分配，避免 DFS 中途 rehash
+        Map<String, Integer> color = graph.newColorMap();
+        Map<String, String> parent = graph.newParentMap();
+        statsDFS(graph.getRootId(), graph, color, parent, 1, stats, result);
     }
 
-    private void statsDFS(String nodeId, GraphData graph,
+    private void statsDFS(String nodeId, SnakeDigestGraph graph,
                           Map<String, Integer> color, Map<String, String> parent,
                           int depth, GraphStats stats,
                           MindMapValidationResult result) {
@@ -351,7 +323,7 @@ public class MindMapGenerationValidator {
         stats.totalNodes++;
         stats.maxDepth = Math.max(stats.maxDepth, depth);
 
-        List<String> children = graph.adjacency.getOrDefault(nodeId, Collections.emptyList());
+        List<String> children = graph.getChildren(nodeId);
         int childCount = children.size();
         stats.maxChildrenPerNode = Math.max(stats.maxChildrenPerNode, childCount);
 

@@ -2,6 +2,8 @@ package org.freeplane.plugin.ai.restapi;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.freeplane.core.resources.ResourceController;
 import org.freeplane.core.util.LogUtils;
 import org.freeplane.features.map.MapModel;
@@ -14,6 +16,7 @@ import org.freeplane.plugin.ai.maps.AvailableMaps;
 import org.freeplane.plugin.ai.service.AIService;
 import org.freeplane.plugin.ai.service.AIServiceLoader;
 import org.freeplane.plugin.ai.service.AIServiceResponse;
+import org.freeplane.plugin.ai.service.impl.DefaultAgentService;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,6 +26,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * AI 相关接口控制器。
@@ -38,6 +42,9 @@ import java.util.Map;
  * - POST /api/ai/build/summarize - 分支摘要
  * - POST /api/ai/build/generate-mindmap - 生成思维导图
  * - POST /api/ai/build/tag - 自动标签
+ *
+ * Config区（/api/ai/config/）：
+ * - POST /api/ai/config/save - 保存模型配置
  */
 public class AiRestController {
 
@@ -51,6 +58,57 @@ public class AiRestController {
         this.aiChatPanel = aiChatPanel;
         this.objectMapper = new ObjectMapper();
         this.bufferLayerRouter = new BufferLayerRouter();
+    }
+
+    /**
+     * POST /api/ai/config/save
+     * 保存前端模型配置（providerName, apiKey, baseUrl, modelName）到 ResourceController。
+     * 支持的 provider：ernie, openrouter, gemini, ollama。
+     */
+    public void handleSaveConfig(HttpExchange exchange) throws IOException {
+        CorsFilter.addCorsHeaders(exchange);
+        if (CorsFilter.handlePreflight(exchange)) return;
+
+        try {
+            Map<?, ?> body = readBody(exchange);
+            String providerName = (String) body.get("providerName");
+            String apiKey      = (String) body.get("apiKey");
+            String baseUrl     = (String) body.get("baseUrl");
+            String modelName   = (String) body.get("modelName");
+
+            if (providerName == null || providerName.trim().isEmpty()) {
+                sendError(exchange, 400, "providerName is required");
+                return;
+            }
+            if (apiKey == null || apiKey.trim().isEmpty()) {
+                sendError(exchange, 400, "apiKey is required");
+                return;
+            }
+
+            ResourceController rc = ResourceController.getResourceController();
+            String prefix = providerName.toLowerCase().trim();
+
+            // 写入 API Key
+            rc.setProperty("ai_" + prefix + "_key", apiKey.trim());
+
+            // 写入 Base URL（若提供）
+            if (baseUrl != null && !baseUrl.trim().isEmpty()) {
+                rc.setProperty("ai_" + prefix + "_service_address", baseUrl.trim());
+            }
+
+            // 写入模型名（若提供），同时更新 selected_model
+            if (modelName != null && !modelName.trim().isEmpty()) {
+                rc.setProperty("ai_selected_model", prefix + "|" + modelName.trim());
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("provider", prefix);
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            LogUtils.warn("AiRestController.handleSaveConfig error", e);
+            sendError(exchange, 500, "Internal server error: " + e.getMessage());
+        }
     }
 
     /**
@@ -167,7 +225,97 @@ public class AiRestController {
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
         }
     }
-    
+
+    /**
+     * POST /api/ai/chat/stream
+     * AI 流式对话接口（SSE）。
+     * 响应格式：text/event-stream，每条消息格式为 "data: <token>\n\n"，
+     * 完成时发送 "data: [DONE]\n\n"，出错时发送 "data: [ERROR] <message>\n\n"。
+     */
+    public void handleChatStream(HttpExchange exchange) throws IOException {
+        CorsFilter.addCorsHeaders(exchange);
+        if (CorsFilter.handlePreflight(exchange)) return;
+
+        Map<?, ?> body;
+        try {
+            body = readBody(exchange);
+        } catch (Exception e) {
+            sendError(exchange, 400, "Invalid request body");
+            return;
+        }
+        String message = (String) body.get("message");
+        if (message == null || message.trim().isEmpty()) {
+            sendError(exchange, 400, "message is required");
+            return;
+        }
+        final String userMessage = message.trim();
+
+        // Set SSE headers before sending anything
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=UTF-8");
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+        exchange.getResponseHeaders().set("Connection", "keep-alive");
+        exchange.sendResponseHeaders(200, 0); // 0 = chunked / unknown length
+        final OutputStream os = exchange.getResponseBody();
+
+        // CountDownLatch keeps this handler thread alive until streaming completes.
+        // Without it, HttpServer closes the connection immediately after chatStream() returns,
+        // because StreamingChatModel.chat() is non-blocking (callbacks fire on SDK threads).
+        final CountDownLatch latch = new CountDownLatch(1);
+
+        aiChatPanel.chatStream(userMessage, new StreamingChatResponseHandler() {
+            @Override
+            public void onPartialResponse(String partialResponse) {
+                if (partialResponse == null || partialResponse.isEmpty()) return;
+                try {
+                    // Escape newlines so each SSE event stays on one line
+                    String escaped = partialResponse.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r");
+                    String chunk = "data: " + escaped + "\n\n";
+                    os.write(chunk.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                } catch (IOException ignored) {
+                    // Client disconnected; unblock the handler thread
+                    latch.countDown();
+                }
+            }
+
+            @Override
+            public void onCompleteResponse(ChatResponse completeResponse) {
+                try {
+                    os.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                    os.close();
+                } catch (IOException ignored) {
+                    // ignore
+                } finally {
+                    latch.countDown();
+                }
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                try {
+                    String msg = error.getMessage();
+                    if (msg == null) msg = error.getClass().getSimpleName();
+                    String escaped = msg.replace("\\", "\\\\").replace("\n", " ").replace("\r", " ");
+                    os.write(("data: [ERROR] " + escaped + "\n\n").getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                    os.close();
+                } catch (IOException ignored) {
+                    // ignore
+                } finally {
+                    latch.countDown();
+                }
+            }
+        });
+
+        // Block until onCompleteResponse or onError fires
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     /**
      * POST /api/ai/build/generate-mindmap
      * AI 一键生成思维导图（使用AIService架构）。
@@ -309,6 +457,98 @@ public class AiRestController {
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleSummarize error", e);
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * POST /api/ai/build/summarize-stream
+     * 分支摘要 SSE 流式接口。
+     * 响应格式：text/event-stream，每条消息格式为 "data: <token>\n\n"，
+     * 完成时发送 "data: [DONE]\n\n"，出错时发送 "data: [ERROR] <message>\n\n"。
+     */
+    public void handleSummarizeStream(HttpExchange exchange) throws IOException {
+        CorsFilter.addCorsHeaders(exchange);
+        if (CorsFilter.handlePreflight(exchange)) return;
+
+        Map<?, ?> body;
+        try {
+            body = readBody(exchange);
+        } catch (Exception e) {
+            sendError(exchange, 400, "Invalid request body");
+            return;
+        }
+        String nodeId = (String) body.get("nodeId");
+        if (nodeId == null || nodeId.trim().isEmpty()) {
+            sendError(exchange, 400, "nodeId is required");
+            return;
+        }
+        String mapId = (String) body.get("mapId");
+        Integer maxWords = body.get("maxWords") instanceof Number
+            ? ((Number) body.get("maxWords")).intValue() : null;
+
+        // 获取 DefaultAgentService 单例
+        AIService service = AIServiceLoader.getServiceByName("default_agent_service");
+        if (!(service instanceof DefaultAgentService)) {
+            sendError(exchange, 500, "Agent service not available");
+            return;
+        }
+        DefaultAgentService agentService = (DefaultAgentService) service;
+
+        exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=UTF-8");
+        exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+        exchange.getResponseHeaders().set("Connection", "keep-alive");
+        exchange.sendResponseHeaders(200, 0);
+        final OutputStream os = exchange.getResponseBody();
+
+        final CountDownLatch latch = new CountDownLatch(1);
+
+        agentService.summarizeStream(nodeId, mapId, maxWords, new StreamingChatResponseHandler() {
+            @Override
+            public void onPartialResponse(String partialResponse) {
+                if (partialResponse == null || partialResponse.isEmpty()) return;
+                try {
+                    String escaped = partialResponse.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r");
+                    os.write(("data: " + escaped + "\n\n").getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                } catch (IOException ignored) {
+                    latch.countDown();
+                }
+            }
+
+            @Override
+            public void onCompleteResponse(ChatResponse completeResponse) {
+                try {
+                    os.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                    os.close();
+                } catch (IOException ignored) {
+                    // ignore
+                } finally {
+                    latch.countDown();
+                }
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                try {
+                    String msg = error.getMessage();
+                    if (msg == null) msg = error.getClass().getSimpleName();
+                    String escaped = msg.replace("\\", "\\\\").replace("\n", " ").replace("\r", " ");
+                    os.write(("data: [ERROR] " + escaped + "\n\n").getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                    os.close();
+                } catch (IOException ignored) {
+                    // ignore
+                } finally {
+                    latch.countDown();
+                }
+            }
+        });
+
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

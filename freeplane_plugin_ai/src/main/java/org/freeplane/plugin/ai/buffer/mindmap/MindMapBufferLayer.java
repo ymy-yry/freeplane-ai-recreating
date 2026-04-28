@@ -11,6 +11,8 @@ import org.freeplane.plugin.ai.buffer.BufferResponse;
 import org.freeplane.plugin.ai.buffer.IBufferLayer;
 import org.freeplane.plugin.ai.chat.AIChatModelFactory;
 import org.freeplane.plugin.ai.chat.AIProviderConfiguration;
+import org.freeplane.plugin.ai.validation.MindMapGenerationValidator;
+import org.freeplane.plugin.ai.validation.MindMapValidationResult;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
@@ -31,12 +33,14 @@ public class MindMapBufferLayer implements IBufferLayer {
     private final MindMapPromptOptimizer promptOptimizer;
     private final MindMapModelRouter modelRouter;
     private final MindMapResultOptimizer resultOptimizer;
+    private final MindMapGenerationValidator validator;
 
     public MindMapBufferLayer() {
         this.requirementAnalyzer = new MindMapRequirementAnalyzer();
         this.promptOptimizer = new MindMapPromptOptimizer();
         this.modelRouter = new MindMapModelRouter();
         this.resultOptimizer = new MindMapResultOptimizer();
+        this.validator = new MindMapGenerationValidator();
         LogUtils.info("MindMapBufferLayer: initialized");
     }
 
@@ -103,6 +107,12 @@ public class MindMapBufferLayer implements IBufferLayer {
             LogUtils.info("MindMapBufferLayer: step 4 - calling AI");
             String aiResponse = callAI(optimizedPrompt, selectedModel, request);
 
+            // 步骤 4.5：结构验证（环检测降级处理）
+            // CIRCULAR_DEPENDENCY → 直接降级为 sampleJSON，不继续使用有环数据
+            // 其他结构性错误（超深度、超子节点数）→ 记录警告，继续流程（数据仍可渲染）
+            LogUtils.info("MindMapBufferLayer: step 4.5 - structural validation");
+            aiResponse = validateAndHandleDegradation(aiResponse, request, response);
+
             // 步骤 5：结果优化
             LogUtils.info("MindMapBufferLayer: step 5 - result optimization");
             Map<String, Object> optimizedData = resultOptimizer.optimizeResult(aiResponse, response);
@@ -138,7 +148,63 @@ public class MindMapBufferLayer implements IBufferLayer {
         return response;
     }
 
-    // 懒初始化的底层 ChatModel（双重检查锁），绕开 AIChatService 的复杂 system message
+    /**
+     * 验证 AI 返回的 JSON 并根据验证结果进行降级处理。
+     *
+     * <ul>
+     *   <li>CIRCULAR_DEPENDENCY：有环数据不可渲染，必须降级 → 返回 sampleJSON，这是可用的安全内容</li>
+     *   <li>EXCEEDS_MAX_DEPTH / EXCEEDS_MAX_CHILDREN：超限但结构合法，降级为警告，继续流程</li>
+     *   <li>PARSE_ERROR：解析失败，降级 → 返回 sampleJSON</li>
+     * </ul>
+     *
+     * @return 原始 aiResponse 或降级内容
+     */
+    private String validateAndHandleDegradation(String aiResponse, BufferRequest request,
+                                                BufferResponse response) {
+        MindMapValidationResult validationResult = validator.validate(aiResponse);
+
+        if (validationResult.isValid()) {
+            // 验证通过（或仅有警告）
+            if (validationResult.hasWarnings()) {
+                validationResult.getWarnings().forEach(w ->
+                    response.addLog("[VALIDATION WARNING] " + w.getCode() + ": " + w.getMessage()));
+                LogUtils.info("MindMapBufferLayer: validation passed with "
+                    + validationResult.getWarnings().size() + " warning(s)");
+            } else {
+                LogUtils.info("MindMapBufferLayer: validation passed");
+            }
+            return aiResponse;
+        }
+
+        // 有错误：分类处理
+        boolean hasCycle = validationResult.getErrors().stream()
+            .anyMatch(e -> "CIRCULAR_DEPENDENCY".equals(e.getCode()));
+        boolean hasParseError = validationResult.getErrors().stream()
+            .anyMatch(e -> "PARSE_ERROR".equals(e.getCode()));
+
+        if (hasCycle || hasParseError) {
+            // 环结构 / 解析失败 → 必须降级，有环数据不能写入思维导图
+            String reason = hasCycle ? "CIRCULAR_DEPENDENCY" : "PARSE_ERROR";
+            String errorMsg = validationResult.getErrors().stream()
+                .filter(e -> reason.equals(e.getCode()))
+                .findFirst().map(e -> e.getMessage()).orElse(reason);
+            LogUtils.warn("MindMapBufferLayer: validation failed [" + reason
+                + "], degrading to sample JSON. reason=" + errorMsg);
+            response.addLog("[VALIDATION DEGRADED] " + reason + ": 降级为示例思维导图");
+            return createSampleMindMapJSON(request.getParameter("topic", "主题"));
+        }
+
+        // 其他结构性错误（超深度、超子节点数等）→ 记录警告，继续使用原始数据
+        validationResult.getErrors().forEach(e ->
+            response.addLog("[VALIDATION WARNING] " + e.getCode() + ": " + e.getMessage()));
+        LogUtils.warn("MindMapBufferLayer: validation has " + validationResult.getErrors().size()
+            + " non-critical error(s), continuing with original response");
+        return aiResponse;
+    }
+
+    /**
+     * 懒初始化的底层 ChatModel（双重检查锁），绕开 AIChatService 的复杂 system message。
+     */
     private volatile ChatModel chatModel;
 
     /**

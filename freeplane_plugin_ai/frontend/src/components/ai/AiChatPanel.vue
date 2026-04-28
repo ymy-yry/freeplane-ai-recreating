@@ -47,34 +47,30 @@ const sendMessage = async () => {
   // 2. 重置流式状态
   aiStore.isGenerating = true
   aiStore.streamText = ''
+  const userText = inputText.value
+  inputText.value = ''
 
-  try {
-    // 3. 调用流式接口
-    const response = await aiChatStream({
-      model: aiStore.currentModel,
-      message: inputText.value,
-      nodeId: aiStore.selectedNode?.id
-    })
-
-    // 4. 逐字读取流式数据
-    const reader = response.data.getReader()
-    const decoder = new TextDecoder()
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      aiStore.streamText += decoder.decode(value)
+  // 3. 调用回调式流式接口
+  await aiChatStream(
+    { model: aiStore.currentModel, message: userText, nodeId: aiStore.selectedNode?.id },
+    (token) => {
+      // 逐 token 追加到流式文本
+      aiStore.streamText += token
+    },
+    () => {
+      // 流式完成：将流式内容入历史
+      aiStore.addMessage({ role: 'assistant', content: aiStore.streamText })
+      aiStore.isGenerating = false
+    },
+    (err) => {
+      // 流式出错
+      console.error('流式对话失败:', err)
+      if (aiStore.streamText) {
+        aiStore.addMessage({ role: 'assistant', content: aiStore.streamText })
+      }
+      aiStore.isGenerating = false
     }
-
-    // 5. 流式结束，添加AI消息
-    aiStore.addMessage({ role: 'assistant', content: aiStore.streamText })
-  } catch (err) {
-    console.error('对话失败:', err)
-  } finally {
-    // 6. 重置状态
-    aiStore.isGenerating = false
-    inputText.value = ''
-  }
+  )
 }
 
 // Markdown 渲染

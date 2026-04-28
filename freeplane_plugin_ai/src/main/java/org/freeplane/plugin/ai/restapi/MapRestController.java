@@ -6,12 +6,18 @@ import org.freeplane.core.util.LogUtils;
 import org.freeplane.features.map.MapController;
 import org.freeplane.features.map.MapModel;
 import org.freeplane.features.map.NodeModel;
+import org.freeplane.features.map.MapWriter;
+import org.freeplane.features.map.mindmapmode.MMapController;
+import org.freeplane.features.map.mindmapmode.MMapModel;
 import org.freeplane.features.mode.Controller;
 import org.freeplane.features.mode.ModeController;
 import org.freeplane.features.mode.mindmapmode.MModeController;
 import org.freeplane.features.ui.IMapViewManager;
 import org.freeplane.plugin.ai.maps.AvailableMaps;
 
+import javax.swing.SwingUtilities;
+
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -214,6 +220,119 @@ public class MapRestController {
         } catch (Exception e) {
             LogUtils.warn("MapRestController.handleSwitchMap error", e);
             sendError(exchange, 500, "Internal server error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * POST /api/maps/import
+     * 从前端传入的 .mm XML 内容字符串导入思维导图并切换到该导图。
+     * 请求体：{ "content": "<map>...", "filename": "example.mm" }
+     */
+    public void handleImportMap(HttpExchange exchange) throws IOException {
+        CorsFilter.addCorsHeaders(exchange);
+        if (CorsFilter.handlePreflight(exchange)) return;
+
+        try {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            Map<String, Object> request = objectMapper.readValue(body, Map.class);
+
+            String content = (String) request.get("content");
+            String filename = request.containsKey("filename") ? (String) request.get("filename") : "imported.mm";
+
+            if (content == null || content.trim().isEmpty()) {
+                sendError(exchange, 400, "content is required");
+                return;
+            }
+
+            Controller controller = Controller.getCurrentController();
+            if (controller == null) {
+                sendError(exchange, 500, "Freeplane controller not available");
+                return;
+            }
+
+            ModeController modeController = controller.getModeController(MModeController.MODENAME);
+            if (!(modeController instanceof MModeController)) {
+                sendError(exchange, 500, "Mindmap mode not available");
+                return;
+            }
+            MModeController mmodeController = (MModeController) modeController;
+            MMapController mapController = (MMapController) mmodeController.getMapController();
+
+            // 步骤1：在当前线程解析 XML（createNodeTreeFromXml 内部 synchronized，线程安全）
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            ByteArrayInputStream inputStream = new ByteArrayInputStream(contentBytes);
+            final MMapModel[] mapHolder = {null};
+            final Exception[] errorHolder = {null};
+
+            try {
+                MMapModel parsedMap = new MMapModel(mapController.duplicator());
+                try (java.io.InputStreamReader reader = new java.io.InputStreamReader(inputStream, StandardCharsets.UTF_8)) {
+                    mapController.getMapReader().createNodeTreeFromXml(
+                        parsedMap,
+                        reader,
+                        MapWriter.Mode.FILE
+                    );
+                }
+                if (parsedMap.getRootNode() == null) {
+                    parsedMap.createNewRoot();
+                }
+                mapHolder[0] = parsedMap;
+            } catch (Exception e) {
+                errorHolder[0] = e;
+            }
+
+            if (errorHolder[0] != null) {
+                sendError(exchange, 500, "Failed to parse map content: " + errorHolder[0].getMessage());
+                return;
+            }
+
+            final MMapModel newMap = mapHolder[0];
+
+            // 步骤2：在 EDT 上执行 UI 注册（fireMapCreated / addLoadedMap / createMapView 需在 EDT）
+            try {
+                SwingUtilities.invokeAndWait(() -> {
+                    try {
+                        mapController.fireMapCreated(newMap);
+                        mapController.addLoadedMap(newMap);
+                        mapController.createMapView(newMap);
+                    } catch (Exception e) {
+                        errorHolder[0] = e;
+                    }
+                });
+            } catch (Exception e) {
+                sendError(exchange, 500, "Failed to create map view: " + e.getMessage());
+                return;
+            }
+
+            if (errorHolder[0] != null) {
+                sendError(exchange, 500, "Failed to register map: " + errorHolder[0].getMessage());
+                return;
+            }
+
+            // 设置标题：优先使用根节点文本，备选扩展名作为 fallback
+            NodeModel rootNode = newMap.getRootNode();
+            String title = (rootNode != null && !rootNode.getText().isEmpty())
+                ? rootNode.getText()
+                : filename.replaceAll("\\.mm$", "");
+
+            UUID mapId = availableMaps.getOrCreateMapIdentifier(newMap);
+
+            // 步骤3：切换视图到新导入的导图
+            IMapViewManager mapViewManager = controller.getMapViewManager();
+            if (mapViewManager != null) {
+                SwingUtilities.invokeLater(() -> mapViewManager.changeToMap(newMap));
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("mapId", mapId.toString());
+            result.put("title", title);
+            result.put("filename", filename);
+
+            sendJson(exchange, 200, result);
+        } catch (Exception e) {
+            LogUtils.warn("MapRestController.handleImportMap error", e);
+            sendError(exchange, 500, "Import failed: " + e.getMessage());
         }
     }
 

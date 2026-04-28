@@ -26,6 +26,8 @@ import org.freeplane.plugin.ai.tools.utilities.ToolCallSummaryHandler;
 
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import javax.swing.AbstractAction;
 import javax.swing.Action;
 import javax.swing.BorderFactory;
@@ -596,6 +598,20 @@ public class AIChatPanel extends JPanel {
         chatRequestFlow.submitRequest(chatService);
     }
 
+    /**
+     * Initiates a streaming chat request for the web SSE endpoint.
+     * Calls {@link AIChatService#chatStream} if the current chat service supports streaming;
+     * otherwise reports an error to the handler immediately.
+     */
+    public void chatStream(String userMessage, StreamingChatResponseHandler handler) {
+        ensureChatService();
+        if (chatService == null) {
+            handler.onError(new IllegalStateException("Chat service not available"));
+            return;
+        }
+        chatService.chatStream(userMessage, handler);
+    }
+
     private boolean isRequestActive() {
         return chatRequestFlow.isRequestActive();
     }
@@ -720,6 +736,10 @@ public class AIChatPanel extends JPanel {
             chatRequestFlow::onToolCallSummary,
             chatRequestFlow.cancellationSupplier(),
             chatRequestFlow::onProviderUsage);
+        StreamingChatModel streamingChatModel = AIChatModelFactory.createStreamingChatModel(configuration);
+        if (streamingChatModel != null) {
+            chatService.setStreamingChatModel(streamingChatModel);
+        }
     }
 
     private void appendChatMessage(String text, ChatMessageCategory category) {

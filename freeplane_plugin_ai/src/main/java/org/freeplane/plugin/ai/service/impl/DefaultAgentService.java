@@ -29,8 +29,10 @@ import org.freeplane.plugin.ai.tools.utilities.ToolCallSummaryHandler;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -46,6 +48,7 @@ public class DefaultAgentService implements AIService {
 
     private static volatile AIChatService agentService;
     private static volatile ChatModel chatModel;
+    private static volatile StreamingChatModel streamingChatModel;
     private static volatile AIToolSet toolSet;
     private static volatile AvailableMaps availableMaps;
     private static volatile BufferLayerRouter bufferLayerRouter;
@@ -366,6 +369,30 @@ public class DefaultAgentService implements AIService {
         ensureAgentInitialized();
     }
 
+    /**
+     * 分支摘要流式接口。
+     * 复用 buildSummarizePrompt 构建 prompt，然后经由 StreamingChatModel 邀 token 回调。
+     *
+     * @param nodeId   节点 ID
+     * @param mapId    导图 ID（可为 null）
+     * @param maxWords 摘要最大字数（可为 null，默认 100）
+     * @param handler  SSE 回调处理器
+     */
+    public void summarizeStream(String nodeId, String mapId, Integer maxWords,
+                                StreamingChatResponseHandler handler) {
+        ensureAgentInitialized();
+        if (streamingChatModel == null) {
+            handler.onError(new UnsupportedOperationException("Streaming not configured for current model"));
+            return;
+        }
+        String prompt = buildSummarizePrompt(nodeId, mapId, maxWords, null);
+        java.util.List<dev.langchain4j.data.message.ChatMessage> messages = java.util.Arrays.asList(
+            SystemMessage.from("You are a professional summarizer. Return only the summary text, no extra content."),
+            UserMessage.from(prompt)
+        );
+        streamingChatModel.chat(messages, handler);
+    }
+
     private void ensureAgentInitialized() {
         if (agentService == null) {
             synchronized (DefaultAgentService.class) {
@@ -411,6 +438,8 @@ public class DefaultAgentService implements AIService {
 
                         // 初始化底层 ChatModel（用于 generate/expand/summarize，绕开工具注册）
                         chatModel = AIChatModelFactory.createChatLanguageModel(configuration);
+                        // 初始化流式 ChatModel（用于 summarizeStream）
+                        streamingChatModel = AIChatModelFactory.createStreamingChatModel(configuration);
 
                         // 初始化工具执行服务
                         toolExecutionService = new DefaultToolExecutionService();
