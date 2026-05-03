@@ -14,6 +14,10 @@ import org.freeplane.features.mode.ModeController;
 import org.freeplane.features.mode.mindmapmode.MModeController;
 import org.freeplane.features.ui.IMapViewManager;
 import org.freeplane.plugin.ai.maps.AvailableMaps;
+import org.freeplane.plugin.ai.validation.MindMapGenerationValidator;
+import org.freeplane.plugin.ai.validation.MindMapValidationResult;
+import org.freeplane.plugin.ai.validation.source.FileValidationSource;
+import org.freeplane.plugin.ai.validation.source.ValidationSource;
 
 import javax.swing.SwingUtilities;
 
@@ -257,6 +261,22 @@ public class MapRestController {
             }
             MModeController mmodeController = (MModeController) modeController;
             MMapController mapController = (MMapController) mmodeController.getMapController();
+
+            // 步骤0:前置环检测拦截(避免解析无效XML)
+            MindMapGenerationValidator validator = new MindMapGenerationValidator();
+            ValidationSource source = new FileValidationSource(content, filename);
+            MindMapValidationResult preValidation = validator.validate(source);
+
+            if (preValidation.getErrors().stream()
+                .anyMatch(e -> "CIRCULAR_DEPENDENCY".equals(e.getCode()))) {
+                LogUtils.warn("MapRestController: import rejected due to circular dependency in " + filename);
+                sendError(exchange, 400, 
+                    "导入失败: 检测到循环依赖 - " + 
+                    preValidation.getErrors().stream()
+                        .filter(e -> "CIRCULAR_DEPENDENCY".equals(e.getCode()))
+                        .findFirst().map(e -> e.getMessage()).orElse("未知环"));
+                return;
+            }
 
             // 步骤1：在当前线程解析 XML（createNodeTreeFromXml 内部 synchronized，线程安全）
             byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);

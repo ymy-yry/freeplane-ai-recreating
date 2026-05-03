@@ -67,7 +67,7 @@
         <button class="ghost-btn" :disabled="!aiStore.buildResult" @click="copyResult">复制结果</button>
         <button
           class="apply-btn"
-          :disabled="!aiStore.buildResult || !selectedNodeId || aiStore.buildLoading"
+          :disabled="!aiStore.buildResult || aiStore.buildLoading"
           @click="applyResult"
         >
           应用到导图
@@ -156,11 +156,12 @@ const copyResult = async () => {
 }
 
 const applyResult = async () => {
-  if (!props.selectedNodeId) return
-  const confirmed = window.confirm('AI 建议已生成，是否应用到当前节点的子节点？')
+  const confirmed = window.confirm('AI 建议已生成，是否应用到导图？')
   if (!confirmed) return
   try {
-    await aiStore.applyBuildResultToMap(props.selectedNodeId, props.mapId)
+    // 如果没有选中节点，则应用到根节点（生成思维导图场景）
+    const targetNodeId = props.selectedNodeId || 'ID_1'
+    await aiStore.applyBuildResultToMap(targetNodeId, props.mapId)
     window.alert('已应用到导图')
   } catch (error: any) {
     window.alert(error?.message || '应用失败')

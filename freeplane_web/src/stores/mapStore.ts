@@ -104,8 +104,25 @@ export const useMapStore = defineStore('map', () => {
   }
 
   const createNode = async (parentId: string, text: string): Promise<string | undefined> => {
-    if (!currentMap.value) return undefined
+    console.log('[mapStore.createNode] 开始创建节点:', { parentId, text })
+    console.log('[mapStore.createNode] 当前 currentMap:', currentMap.value)
+    
+    // 如果没有当前地图，先加载
+    if (!currentMap.value) {
+      console.warn('[mapStore.createNode] currentMap 为空，尝试加载...')
+      await loadMap()
+    }
+    
+    if (!currentMap.value) {
+      const errorMsg = '未找到当前导图，请确保 Freeplane 已打开一个导图'
+      console.error('[mapStore.createNode]', errorMsg)
+      throw new Error(errorMsg)
+    }
+    
+    console.log('[mapStore.createNode] 使用 mapId:', currentMap.value.mapId)
     const newId = await mapApi.createNode(currentMap.value.mapId, parentId, text)
+    console.log('[mapStore.createNode] 节点创建成功，新 ID:', newId)
+    
     await loadMap()
     return newId
   }

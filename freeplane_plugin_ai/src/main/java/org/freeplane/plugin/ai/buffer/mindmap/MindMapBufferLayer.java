@@ -13,6 +13,8 @@ import org.freeplane.plugin.ai.chat.AIChatModelFactory;
 import org.freeplane.plugin.ai.chat.AIProviderConfiguration;
 import org.freeplane.plugin.ai.validation.MindMapGenerationValidator;
 import org.freeplane.plugin.ai.validation.MindMapValidationResult;
+import org.freeplane.plugin.ai.validation.source.PromptValidationSource;
+import org.freeplane.plugin.ai.validation.source.ValidationSource;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
@@ -161,7 +163,12 @@ public class MindMapBufferLayer implements IBufferLayer {
      */
     private String validateAndHandleDegradation(String aiResponse, BufferRequest request,
                                                 BufferResponse response) {
-        MindMapValidationResult validationResult = validator.validate(aiResponse);
+        // 使用 ValidationSource 代理,日志包含模型信息
+        ValidationSource source = new PromptValidationSource(
+            aiResponse, 
+            request.getParameter("selectedModel", null)
+        );
+        MindMapValidationResult validationResult = validator.validate(source);
 
         if (validationResult.isValid()) {
             // 验证通过（或仅有警告）

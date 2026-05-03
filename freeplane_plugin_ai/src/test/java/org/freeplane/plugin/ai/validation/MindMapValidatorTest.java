@@ -1,8 +1,15 @@
 package org.freeplane.plugin.ai.validation;
 
+import org.freeplane.plugin.ai.validation.source.FileValidationSource;
+import org.freeplane.plugin.ai.validation.source.PromptValidationSource;
+import org.freeplane.plugin.ai.validation.source.SourceType;
+import org.freeplane.plugin.ai.validation.source.StreamValidationSource;
+import org.freeplane.plugin.ai.validation.source.ValidationSource;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -59,7 +66,7 @@ public class MindMapValidatorTest {
 
     @Test
     public void testEmptyInput() {
-        MindMapValidationResult r1 = validator.validate(null);
+        MindMapValidationResult r1 = validator.validate((String) null);
         assertThat(r1.hasErrors()).isTrue();
         assertThat(r1.getErrors().get(0).getCode()).isEqualTo("EMPTY_INPUT");
 
@@ -484,5 +491,77 @@ public class MindMapValidatorTest {
     private long usedMemoryBytes() {
         Runtime rt = Runtime.getRuntime();
         return rt.totalMemory() - rt.freeMemory();
+    }
+
+    // =========================================================================
+    // 第五组：ValidationSource 代理接口测试
+    // =========================================================================
+
+    @Test
+    public void testValidateWithPromptValidationSource() {
+        String json = buildLinearChain(3, "root");
+        ValidationSource source = new PromptValidationSource(json, "ernie-4.0");
+        
+        MindMapValidationResult result = validator.validate(source);
+        assertThat(result.isValid()).isTrue();
+        assertThat(source.getSourceType()).isEqualTo(SourceType.PROMPT_RESPONSE);
+        assertThat(source.getDescription()).contains("ernie-4.0");
+    }
+
+    @Test
+    public void testValidateWithStreamValidationSource_NotReady() {
+        StreamValidationSource source = new StreamValidationSource("test-stream");
+        source.append("{\"text\":\"root\""); // 未完整
+        // 未调用 markComplete()
+        
+        MindMapValidationResult result = validator.validate(source);
+        assertThat(result.hasErrors()).isTrue();
+        assertThat(result.getErrors().stream()
+            .anyMatch(e -> "NOT_READY".equals(e.getCode()))).isTrue();
+        assertThat(source.getSourceType()).isEqualTo(SourceType.STREAM_ASSEMBLED);
+    }
+
+    @Test
+    public void testValidateWithStreamValidationSource_Ready() {
+        StreamValidationSource source = new StreamValidationSource("test-stream");
+        source.append("{\"text\":\"root\",\"children\":[]}");
+        source.markComplete();
+        
+        MindMapValidationResult result = validator.validate(source);
+        assertThat(result.isValid()).isTrue();
+        assertThat(source.getSourceType()).isEqualTo(SourceType.STREAM_ASSEMBLED);
+    }
+
+    @Test
+    public void testValidateWithFileValidationSource() throws Exception {
+        // 创建临时JSON文件
+        Path tempFile = Files.createTempFile("test-map", ".json");
+        Files.writeString(tempFile, buildLinearChain(3, "root"));
+        
+        ValidationSource source = new FileValidationSource(tempFile, "test-map.json");
+        MindMapValidationResult result = validator.validate(source);
+        
+        assertThat(result.isValid()).isTrue();
+        assertThat(source.getSourceType()).isEqualTo(SourceType.FILE_IMPORT);
+        Files.delete(tempFile);
+    }
+
+    @Test
+    public void testValidateWithNullSource() {
+        MindMapValidationResult result = validator.validate((ValidationSource) null);
+        assertThat(result.hasErrors()).isTrue();
+        assertThat(result.getErrors().stream()
+            .anyMatch(e -> "NULL_SOURCE".equals(e.getCode()))).isTrue();
+    }
+
+    @Test
+    public void testValidateAsyncWithValidationSource() throws Exception {
+        String json = buildLinearChain(3, "root");
+        ValidationSource source = new PromptValidationSource(json, "test-model");
+        
+        var future = validator.validateAsync(source, executor);
+        MindMapValidationResult result = future.get(5, TimeUnit.SECONDS);
+        
+        assertThat(result.isValid()).isTrue();
     }
 }

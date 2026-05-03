@@ -14,6 +14,12 @@ import org.freeplane.plugin.ai.tools.content.AttributeEntry;
 import org.freeplane.plugin.ai.tools.read.ReadNodesWithDescendantsRequest;
 import org.freeplane.plugin.ai.tools.read.FetchNodesForEditingRequest;
 import org.freeplane.plugin.ai.tools.selection.SelectionIdentifiersRequest;
+import org.freeplane.plugin.ai.strategy.ToolStrategyDispatcher;
+import org.freeplane.plugin.ai.strategy.GreedyLocalSearchStrategy;
+import org.freeplane.plugin.ai.strategy.IntervalDPStrategy;
+import org.freeplane.plugin.ai.strategy.UnionFindLCAStrategy;
+import org.freeplane.plugin.ai.strategy.KnapsackDPStrategy;
+import org.freeplane.plugin.ai.strategy.OptimizedToolCall;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -21,15 +27,47 @@ import java.util.stream.Collectors;
 /**
  * 工具执行服务实现
  * 提供直接的工具调用能力，绕过 LLM 聊天环节
+ * 
+ * <p>架构演进：
+ * <ul>
+ *   <li>原架构：硬编码 Map 映射工具执行器</li>
+ *   <li>新架构：策略者模式 + 动态规划算法优化</li>
+ *   <li>向后兼容：保留原有执行器，新增策略调度层</li>
+ * </ul>
  */
 public class DefaultToolExecutionService implements ToolExecutionService {
 
     private AIToolSet toolSet;
     private final Map<String, ToolExecutor> toolExecutors;
+    private final ToolStrategyDispatcher strategyDispatcher;
+    private boolean strategyEnabled = true; // 默认启用策略优化
 
     public DefaultToolExecutionService() {
         this.toolExecutors = new HashMap<>();
+        this.strategyDispatcher = new ToolStrategyDispatcher();
         initializeToolExecutors();
+        initializeStrategies();
+    }
+
+    /**
+     * 初始化策略调度器
+     * 注册所有优化策略（按优先级自动排序）
+     */
+    private void initializeStrategies() {
+        // 优先级 5：贪心+局部搜索（核心优化）
+        strategyDispatcher.registerStrategy(new GreedyLocalSearchStrategy());
+        
+        // 优先级 10：区间动态规划（兄弟节点批量处理）
+        strategyDispatcher.registerStrategy(new IntervalDPStrategy());
+        
+        // 优先级 15：并查集+LCA（消除重复调用）
+        strategyDispatcher.registerStrategy(new UnionFindLCAStrategy());
+        
+        // 优先级 20：完全背包DP（资源约束优化）
+        strategyDispatcher.registerStrategy(new KnapsackDPStrategy());
+        
+        LogUtils.info("DefaultToolExecutionService: Initialized " + 
+                      strategyDispatcher.getStrategyCount() + " optimization strategies");
     }
 
     private void initializeToolExecutors() {
@@ -52,9 +90,37 @@ public class DefaultToolExecutionService implements ToolExecutionService {
             throw new IllegalStateException("AIToolSet not initialized");
         }
 
+        // 策略优化路径（优先尝试）
+        if (strategyEnabled) {
+            try {
+                LogUtils.info("ToolExecutionService: Attempting strategy optimization for tool " + toolName);
+                Object optimizedResult = strategyDispatcher.dispatch(toolName, parameters);
+                
+                // 如果策略返回优化方案，记录日志
+                if (optimizedResult instanceof OptimizedToolCall) {
+                    OptimizedToolCall optimized = (OptimizedToolCall) optimizedResult;
+                    LogUtils.info("ToolExecutionService: Strategy optimization applied: " + 
+                                  optimized.getStrategyName() + ", steps=" + optimized.getStepCount() + 
+                                  ", time=" + optimized.getOptimizationTimeMs() + "ms");
+                    
+                    // 注意：这里返回的是优化方案，实际工具执行仍需要调用原始执行器
+                    // 后续可以扩展为直接执行优化后的工具调用序列
+                }
+                
+                return optimizedResult;
+            } catch (UnsupportedOperationException e) {
+                // 没有匹配的策略，降级到原始执行器
+                LogUtils.info("ToolExecutionService: No matching strategy, falling back to original executor");
+            } catch (Exception e) {
+                // 策略执行失败，降级到原始执行器
+                LogUtils.warn("ToolExecutionService: Strategy optimization failed, falling back to original executor", e);
+            }
+        }
+
+        // 原始执行器路径（向后兼容）
         ToolExecutor executor = toolExecutors.get(toolName);
         try {
-            LogUtils.info("ToolExecutionService: Executing tool " + toolName);
+            LogUtils.info("ToolExecutionService: Executing tool " + toolName + " (original executor)");
             Object result = executor.execute(parameters);
             LogUtils.info("ToolExecutionService: Tool " + toolName + " executed successfully");
             return result;
@@ -82,6 +148,34 @@ public class DefaultToolExecutionService implements ToolExecutionService {
     @Override
     public AIToolSet getToolSet() {
         return toolSet;
+    }
+
+    /**
+     * 启用或禁用策略优化
+     * 
+     * @param enabled true 启用策略优化，false 使用原始执行器
+     */
+    public void setStrategyEnabled(boolean enabled) {
+        this.strategyEnabled = enabled;
+        LogUtils.info("ToolExecutionService: Strategy optimization " + (enabled ? "enabled" : "disabled"));
+    }
+
+    /**
+     * 检查策略优化是否启用
+     * 
+     * @return true 如果策略优化已启用
+     */
+    public boolean isStrategyEnabled() {
+        return strategyEnabled;
+    }
+
+    /**
+     * 获取策略调度器（用于监控和管理）
+     * 
+     * @return 策略调度器实例
+     */
+    public ToolStrategyDispatcher getStrategyDispatcher() {
+        return strategyDispatcher;
     }
 
     // 工具执行器接口

@@ -2,34 +2,37 @@ package org.freeplane.plugin.ai.buffer.mindmap;
 
 import org.freeplane.core.util.LogUtils;
 import org.freeplane.plugin.ai.buffer.BufferRequest;
+import org.yaml.snakeyaml.Yaml;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.Properties;
 
 /**
  * 思维导图提示词优化器。
  * 维护领域 Prompt 模板库，根据需求选择模板并填充参数。
+ * 支持 YAML 格式（多行文本原生支持）。
  */
 public class MindMapPromptOptimizer {
 
-    private final Properties promptTemplates;
+    private Map<String, Object> promptTemplates;
 
     public MindMapPromptOptimizer() {
-        this.promptTemplates = new Properties();
         loadTemplates();
     }
 
     /**
-     * 加载 Prompt 模板
+     * 加载 Prompt 模板（YAML 格式）
      */
     private void loadTemplates() {
-        try (InputStream is = getClass().getResourceAsStream("/org/freeplane/plugin/ai/buffer/prompts.properties")) {
+        try (InputStream is = getClass().getResourceAsStream("/org/freeplane/plugin/ai/buffer/prompts.yaml")) {
             if (is != null) {
-                promptTemplates.load(new java.io.InputStreamReader(is, StandardCharsets.UTF_8));
-                LogUtils.info("MindMapPromptOptimizer: loaded " + promptTemplates.size() + " prompt templates");
+                Yaml yaml = new Yaml();
+                promptTemplates = yaml.load(is);
+                LogUtils.info("MindMapPromptOptimizer: loaded YAML prompt templates");
             } else {
-                LogUtils.warn("MindMapPromptOptimizer: prompts.properties not found");
+                LogUtils.warn("MindMapPromptOptimizer: prompts.yaml not found");
             }
         } catch (Exception e) {
             LogUtils.warn("MindMapPromptOptimizer: failed to load templates", e);
@@ -43,7 +46,7 @@ public class MindMapPromptOptimizer {
      */
     public String optimizePrompt(BufferRequest request) {
         String templateKey = selectTemplateKey(request);
-        String template = promptTemplates.getProperty(templateKey);
+        String template = getTemplate(templateKey);
 
         if (template == null) {
             LogUtils.warn("MindMapPromptOptimizer: template not found - " + templateKey);
@@ -55,6 +58,29 @@ public class MindMapPromptOptimizer {
         LogUtils.info("MindMapPromptOptimizer: optimized prompt length - " + optimizedPrompt.length() + " chars");
 
         return optimizedPrompt;
+    }
+
+    /**
+     * 从嵌套 Map 中获取模板值
+     */
+    @SuppressWarnings("unchecked")
+    private String getTemplate(String key) {
+        if (promptTemplates == null) return null;
+        
+        String[] parts = key.split("\\.");
+        Map<String, Object> current = promptTemplates;
+        
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = current.get(parts[i]);
+            if (next instanceof Map) {
+                current = (Map<String, Object>) next;
+            } else {
+                return null;
+            }
+        }
+        
+        Object value = current.get(parts[parts.length - 1]);
+        return value instanceof String ? (String) value : null;
     }
 
     /**

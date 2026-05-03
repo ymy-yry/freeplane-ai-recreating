@@ -53,7 +53,7 @@ tasks.matching { it.name == 'pluginJar' }.configureEach {
     from(sourceSets.bootstrap.output)
 }
 
-ext.bundleImports = 'io.github.gitbucket.markedj.*'
+ext.bundleImports = 'nothing.*'
 ext.bundleActivator = 'org.freeplane.plugin.ai.bootstrap.Java8BootstrapActivator'
 ext.bundleBndInstructions = ['-noee': 'true']
 
@@ -117,6 +117,8 @@ dependencies {
     lib 'dev.langchain4j:langchain4j-open-ai:1.11.0'
     lib 'dev.langchain4j:langchain4j-ollama:1.11.0'
     lib 'dev.langchain4j:langchain4j-google-ai-gemini:1.11.0'
+    lib 'org.yaml:snakeyaml:2.2'
+    lib 'io.github.gitbucket:markedj:1.0.20'
 }
 
 eclipse {

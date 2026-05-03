@@ -339,8 +339,11 @@ export const useAIStore = defineStore('ai', () => {
       })
       buildResult.value = res.data.result || `已生成 ${res.data.nodeCount || 0} 个节点`
       buildResultStatus.value = 'ready'
+      
+      // 后端已通过 MindMapBufferLayer 直接创建节点，前端只需重新加载地图
       const mapStore = useMapStore()
       await mapStore.loadMap()
+      
       return res.data
     } catch (error: any) {
       lastError.value = error?.message || '生成导图失败'
@@ -350,7 +353,7 @@ export const useAIStore = defineStore('ai', () => {
     }
   }
 
-  const parseTreeNodes = (text: string): TreeNode[] => {
+  const parseTreeNodes = (text: string, isRootLevel: boolean = false): TreeNode[] => {
     const normalized = normalizeResultText(text)
     if (!normalized) return []
     try {
@@ -360,11 +363,18 @@ export const useAIStore = defineStore('ai', () => {
           .map((item: any) => typeof item === 'string' ? { text: item } : item)
       }
       if (parsed?.children && Array.isArray(parsed.children)) {
-        return parsed.children.filter((item: any) => item?.text || typeof item === 'string')
-          .map((item: any) => typeof item === 'string' ? { text: item } : item)
+        // 如果是根节点级别，直接返回 children（避免嵌套）
+        // 否则返回包含根节点的数组
+        return isRootLevel 
+          ? parsed.children.filter((item: any) => item?.text || typeof item === 'string')
+              .map((item: any) => typeof item === 'string' ? { text: item } : item)
+          : [parsed]
       }
       if (parsed?.text) {
-        return [parsed]
+        return isRootLevel && parsed?.children 
+          ? parsed.children.filter((item: any) => item?.text || typeof item === 'string')
+              .map((item: any) => typeof item === 'string' ? { text: item } : item)
+          : [parsed]
       }
     } catch (e) {
       console.warn('解析 AI 返回的 JSON 失败:', e)
@@ -374,7 +384,10 @@ export const useAIStore = defineStore('ai', () => {
 
   const applyBuildResultToMap = async (targetNodeId: string, mapId?: string) => {
     const mapStore = useMapStore()
-    const treeNodes = parseTreeNodes(buildResult.value)
+    // 如果是根节点 ID_1，使用 isRootLevel=true 提取 children
+    // 否则（展开节点等场景）使用 isRootLevel=false
+    const isRootLevel = targetNodeId === 'ID_1'
+    const treeNodes = parseTreeNodes(buildResult.value, isRootLevel)
     if (!treeNodes.length) {
       throw new Error('结果中未解析到可应用的节点，请确保 AI 返回 JSON 数组或 children 结构')
     }

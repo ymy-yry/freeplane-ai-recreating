@@ -3,6 +3,7 @@ package org.freeplane.plugin.ai.validation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.freeplane.core.util.LogUtils;
+import org.freeplane.plugin.ai.validation.source.ValidationSource;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -122,6 +123,67 @@ public class MindMapGenerationValidator {
                 callback.onValidationComplete(result);
             }
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // ValidationSource 代理入口(新增)
+    // -------------------------------------------------------------------------
+
+    /**
+     * 通过 ValidationSource 代理接口验证思维导图。
+     * 
+     * <p>设计要点:
+     * <ul>
+     *   <li>检查 source.isReady(),未就绪返回 NOT_READY 错误</li>
+     *   <li>调用 source.readContent() 获取 JSON</li>
+     *   <li>日志带入 source.getDescription() 和 source.getSourceType()</li>
+     *   <li>委托现有 validate(String) 执行</li>
+     * </ul>
+     * 
+     * @param source 验证数据源代理
+     * @return 验证结果
+     */
+    public MindMapValidationResult validate(ValidationSource source) {
+        if (source == null) {
+            MindMapValidationResult result = new MindMapValidationResult();
+            result.addError("NULL_SOURCE", "验证数据源为空");
+            return result;
+        }
+        
+        if (!source.isReady()) {
+            MindMapValidationResult result = new MindMapValidationResult();
+            result.addError("NOT_READY", 
+                "数据源未就绪: " + source.getDescription() + 
+                " [" + source.getSourceType() + "]");
+            return result;
+        }
+        
+        try {
+            String content = source.readContent();
+            LogUtils.info("MindMapGenerationValidator: validating source=" 
+                + source.getSourceType() + " / " + source.getDescription());
+            
+            // 委托现有 validate(String) 执行
+            return validate(content);
+        } catch (Exception e) {
+            MindMapValidationResult result = new MindMapValidationResult();
+            result.addError("READ_ERROR", 
+                "读取数据源失败 [" + source.getSourceType() + "]: " + e.getMessage());
+            LogUtils.warn("MindMapGenerationValidator: failed to read source", e);
+            return result;
+        }
+    }
+
+    /**
+     * 异步验证(通过 ValidationSource 代理)。
+     * 
+     * @param source   验证数据源代理
+     * @param executor 线程池(由调用方提供)
+     * @return 包含验证结果的 CompletableFuture
+     */
+    public CompletableFuture<MindMapValidationResult> validateAsync(
+            ValidationSource source, ExecutorService executor) {
+        return CompletableFuture.supplyAsync(() -> validate(source), executor);
     }
 
     public interface ValidationCallback {

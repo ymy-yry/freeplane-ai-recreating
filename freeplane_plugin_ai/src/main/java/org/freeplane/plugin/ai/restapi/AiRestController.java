@@ -335,26 +335,32 @@ public class AiRestController {
                 return;
             }
     
-            // 构建请求参数
-            Map<String, Object> request = new LinkedHashMap<>();
-            request.put("serviceType", "agent");
-            request.put("action", "generate-mindmap");
-            request.put("topic", topic);
-            request.put("modelSelection", modelSelection);
-            request.put("maxDepth", maxDepth);
+            LogUtils.info("AiRestController.handleGenerateMindMap: topic=" + topic + ", maxDepth=" + maxDepth);
     
-            // 使用AIService处理请求
-            AIService service = AIServiceLoader.selectService(request);
-            if (service == null) {
-                sendError(exchange, 500, "No agent service available");
-                return;
+            // 使用 BufferLayerRouter 处理请求（与 Auto 模式相同，在后端直接创建节点）
+            BufferRequest bufferRequest = new BufferRequest("生成思维导图：" + topic);
+            bufferRequest.setRequestType(BufferRequest.RequestType.MINDMAP_GENERATION);
+            bufferRequest.addParameter("topic", topic);
+            bufferRequest.addParameter("maxDepth", maxDepth);
+            if (modelSelection != null && !modelSelection.trim().isEmpty()) {
+                bufferRequest.addParameter("selectedModel", modelSelection);
             }
-    
-            AIServiceResponse serviceResponse = service.processRequest(request);
-            if (serviceResponse.isSuccess()) {
-                sendJson(exchange, 200, serviceResponse.getData());
+            
+            BufferResponse bufferResponse = bufferLayerRouter.processRequest(bufferRequest);
+            
+            if (bufferResponse.isSuccess()) {
+                // 构建响应数据
+                Map<String, Object> responseData = new LinkedHashMap<>();
+                responseData.put("success", true);
+                responseData.put("topic", topic);
+                responseData.put("nodeCount", bufferResponse.getData().get("nodeCount"));
+                responseData.put("result", objectMapper.writeValueAsString(bufferResponse.getData()));
+                responseData.put("usedModel", bufferResponse.getUsedModel());
+                responseData.put("logs", bufferResponse.getLogs());
+                
+                sendJson(exchange, 200, responseData);
             } else {
-                sendError(exchange, 500, serviceResponse.getErrorMessage());
+                sendError(exchange, 500, bufferResponse.getErrorMessage());
             }
         } catch (Exception e) {
             LogUtils.warn("AiRestController.handleGenerateMindMap error", e);

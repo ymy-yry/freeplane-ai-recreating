@@ -338,6 +338,28 @@
     store.deleteNode(nodeId)
     hideContextMenu()
   }
+
+  // 组件挂载时加载当前地图
+  onMounted(async () => {
+    console.log('[MindMapCanvas] 组件挂载，开始加载地图...')
+    try {
+      await store.loadMap()
+      console.log('[MindMapCanvas] 地图加载成功:', store.currentMap)
+    } catch (error) {
+      console.error('[MindMapCanvas] 地图加载失败:', error)
+    }
+    
+    // 启动轮询，保持与 Freeplane 同步
+    const pollInterval = setInterval(() => {
+      console.log('[MindMapCanvas] 轮询刷新地图...')
+      store.loadMap()
+    }, 3000) // 每3秒刷新一次
+    
+    // 组件卸载时清理定时器
+    onUnmounted(() => {
+      clearInterval(pollInterval)
+    })
+  })
   </script>
   
   <style scoped>

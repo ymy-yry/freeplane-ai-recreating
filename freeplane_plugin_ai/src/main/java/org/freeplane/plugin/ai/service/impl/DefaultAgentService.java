@@ -4,6 +4,7 @@ import org.freeplane.core.util.LogUtils;
 import org.freeplane.features.map.MapModel;
 import org.freeplane.features.map.NodeModel;
 import org.freeplane.plugin.ai.buffer.BufferLayerRouter;
+import org.freeplane.plugin.ai.buffer.mindmap.MindMapPromptOptimizer;
 import org.freeplane.plugin.ai.chat.AIChatService;
 import org.freeplane.plugin.ai.chat.AIChatModelFactory;
 import org.freeplane.plugin.ai.chat.AIChatServiceFactory;
@@ -34,13 +35,8 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
-import java.util.Properties;
 import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -54,41 +50,11 @@ public class DefaultAgentService implements AIService {
     private static volatile BufferLayerRouter bufferLayerRouter;
     private static final AtomicInteger inputTokens = new AtomicInteger(0);
     private static final AtomicInteger outputTokens = new AtomicInteger(0);
-    private static Properties promptTemplates;
+    private static final MindMapPromptOptimizer promptOptimizer = new MindMapPromptOptimizer();
     private static volatile ToolExecutionService toolExecutionService;
     private static volatile BuildTaskScheduler taskScheduler;
     private static volatile SchedulingConfig schedulingConfig;
     private static volatile SchedulingMonitor schedulingMonitor;
-
-    static {
-        loadPromptTemplates();
-    }
-
-    private static void loadPromptTemplates() {
-        promptTemplates = new Properties();
-        try {
-            String resourcePath = "org/freeplane/plugin/ai/buffer/prompts.properties";
-            InputStream inputStream = DefaultAgentService.class.getClassLoader().getResourceAsStream(resourcePath);
-            if (inputStream != null) {
-                promptTemplates.load(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
-                LogUtils.info("DefaultAgentService: Loaded prompt templates from " + resourcePath);
-            } else {
-                LogUtils.warn("DefaultAgentService: Could not find prompts.properties resource");
-            }
-        } catch (IOException e) {
-            LogUtils.warn("DefaultAgentService: Failed to load prompt templates", e);
-        }
-    }
-
-    private static String getPromptTemplate(String key, String defaultValue) {
-        if (promptTemplates != null) {
-            String template = promptTemplates.getProperty(key);
-            if (template != null && !template.trim().isEmpty()) {
-                return template;
-            }
-        }
-        return defaultValue;
-    }
 
     @Override
     public AIServiceType getServiceType() {
@@ -175,8 +141,9 @@ public class DefaultAgentService implements AIService {
             }
 
             String prompt = buildMindMapPrompt(topic, request);
+            // 使用简单的 System Prompt，完整的 Prompt 工程在 prompts.properties 模板中
             String result = chatWithModel(
-                "You are a mind map expert. Return only valid JSON, no markdown, no explanation.",
+                "You are a helpful assistant. Follow the instructions below carefully.",
                 prompt
             );
 
@@ -493,28 +460,15 @@ public class DefaultAgentService implements AIService {
     }
 
     private String buildMindMapPrompt(String topic, Map<String, Object> request) {
-        Integer maxDepth = (Integer) request.get("maxDepth");
-        if (maxDepth == null) maxDepth = 3;
-
-        String template = getPromptTemplate("mindmap.generation.zh",
-            "请为'{topic}'生成一个完整的思维导图结构。\n\n" +
-            "要求：\n" +
-            "1. 包含 {maxDepth} 层级的节点\n" +
-            "2. 每个节点内容具体、有价值\n" +
-            "3. 返回严格的 JSON 格式，不要其他文字\n\n" +
-            "返回格式示例：\n" +
-            "{\n" +
-            "  \"text\": \"{topic}\",\n" +
-            "  \"children\": [\n" +
-            "    {\"text\": \"一级分支1\", \"children\": [{\"text\": \"二级分支1.1\"}]},\n" +
-            "    {\"text\": \"一级分支2\"}\n" +
-            "  ]\n" +
-            "}\n\n" +
-            "请只返回 JSON，不要Markdown代码块标记。");
-
-        return template
-            .replace("{topic}", topic)
-            .replace("{maxDepth}", String.valueOf(maxDepth));
+        // 使用 MindMapPromptOptimizer 从 prompts.yaml 加载 CoT 模板
+        org.freeplane.plugin.ai.buffer.BufferRequest bufferRequest = 
+            new org.freeplane.plugin.ai.buffer.BufferRequest("生成思维导图：" + topic);
+        bufferRequest.setRequestType(org.freeplane.plugin.ai.buffer.BufferRequest.RequestType.MINDMAP_GENERATION);
+        bufferRequest.addParameter("topic", topic);
+        bufferRequest.addParameter("maxDepth", request.get("maxDepth") != null ? (Integer) request.get("maxDepth") : 3);
+        bufferRequest.addParameter("language", "zh");
+        
+        return promptOptimizer.optimizePrompt(bufferRequest);
     }
 
     private String buildExpandNodePrompt(String nodeId, String mapId, Integer depth, Integer count, String focus) {
@@ -550,33 +504,18 @@ public class DefaultAgentService implements AIService {
             LogUtils.warn("DefaultAgentService: failed to read node text for " + nodeId, e);
         }
 
-        String template = getPromptTemplate("mindmap.expansion.zh",
-            "你是一位专业的内容扩展专家，擅长为思维导图节点提供详细、有价值的扩展内容。\n\n" +
-            "任务：请为节点 '{nodeText}' 展开更详细的内容。\n\n" +
-            "详细指令：\n" +
-            "1. 基于节点内容，生成 {count} 个子节点\n" +
-            "2. 展开深度为 {depth} 层\n" +
-            "3. 关注方向：{focus}\n" +
-            "4. 确保扩展内容与原节点主题相关\n" +
-            "5. 内容要具体、有价值，避免空洞的表述\n\n" +
-            "质量标准：\n" +
-            "- 扩展内容与原节点主题高度相关\n" +
-            "- 子节点内容具体、有深度\n" +
-            "- 层次结构清晰，逻辑连贯\n" +
-            "- 符合用户指定的关注方向\n\n" +
-            "返回格式：严格返回 JSON，不要 Markdown 代码块标记。\n" +
-            "{\n" +
-            "  \"children\": [\n" +
-            "    {\"text\": \"子节点1\", \"children\": [{\"text\": \"孙节点1.1\"}]},\n" +
-            "    {\"text\": \"子节点2\"}\n" +
-            "  ]\n" +
-            "}");
-
-        return template
-            .replace("{nodeText}", nodeText + contextInfo)
-            .replace("{count}", String.valueOf(count))
-            .replace("{depth}", String.valueOf(depth))
-            .replace("{focus}", focus);
+        // 使用 MindMapPromptOptimizer 从 prompts.yaml 加载 CoT 模板
+        org.freeplane.plugin.ai.buffer.BufferRequest bufferRequest = 
+            new org.freeplane.plugin.ai.buffer.BufferRequest("展开节点：" + nodeText);
+        bufferRequest.setRequestType(org.freeplane.plugin.ai.buffer.BufferRequest.RequestType.NODE_EXPANSION);
+        bufferRequest.addParameter("nodeText", nodeText);
+        bufferRequest.addParameter("contextInfo", contextInfo);
+        bufferRequest.addParameter("depth", depth);
+        bufferRequest.addParameter("count", count);
+        bufferRequest.addParameter("focus", focus);
+        bufferRequest.addParameter("language", "zh");
+        
+        return promptOptimizer.optimizePrompt(bufferRequest);
     }
 
     private String buildSummarizePrompt(String nodeId, String mapId, Integer maxWords, Boolean writeToNote) {
@@ -598,29 +537,15 @@ public class DefaultAgentService implements AIService {
             LogUtils.warn("DefaultAgentService: failed to read branch text for " + nodeId, e);
         }
 
-        String template = getPromptTemplate("mindmap.summary.zh",
-            "你是一位专业的内容摘要专家，擅长从复杂信息中提取核心要点，生成简洁明了的摘要。\n\n" +
-            "任务：请为以下内容生成简洁的摘要。\n\n" +
-            "内容：\n" +
-            "{content}\n\n" +
-            "详细指令：\n" +
-            "1. 分析内容，识别核心要点和关键信息\n" +
-            "2. 生成长度不超过 {maxWords} 字的摘要\n" +
-            "3. 保留所有核心要点，确保信息完整性\n" +
-            "4. 使用简洁清晰的语言，避免冗余\n" +
-            "5. 直接返回摘要文本，不要包含任何其他内容\n" +
-            "6. 使用中文进行摘要创作\n\n" +
-            "质量标准：\n" +
-            "- 摘要准确反映原内容的核心要点\n" +
-            "- 语言简洁明了，没有冗余信息\n" +
-            "- 逻辑连贯，易于理解\n" +
-            "- 长度控制在指定范围内\n\n" +
-            "返回格式：\n" +
-            "请直接返回摘要文本，不要包含任何其他内容或格式标记。");
-
-        return template
-            .replace("{content}", branchContent)
-            .replace("{maxWords}", String.valueOf(maxWords));
+        // 使用 MindMapPromptOptimizer 从 prompts.yaml 加载 CoT 模板
+        org.freeplane.plugin.ai.buffer.BufferRequest bufferRequest = 
+            new org.freeplane.plugin.ai.buffer.BufferRequest("生成摘要：" + branchContent.substring(0, Math.min(50, branchContent.length())));
+        bufferRequest.setRequestType(org.freeplane.plugin.ai.buffer.BufferRequest.RequestType.BRANCH_SUMMARY);
+        bufferRequest.addParameter("content", branchContent);
+        bufferRequest.addParameter("maxWords", maxWords);
+        bufferRequest.addParameter("language", "zh");
+        
+        return promptOptimizer.optimizePrompt(bufferRequest);
     }
 
     private String extractBranchText(NodeModel node) {
