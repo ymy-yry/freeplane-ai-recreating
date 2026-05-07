@@ -1,430 +1,629 @@
-# Freeplane 1.13.x — 源码架构说明
+# 🤖 Freeplane AI Plugin
 
-> Freeplane 是一款开源的思维导图编辑器，基于 Java/Swing + OSGi 插件框架构建，支持 Windows、macOS、Linux 三平台。
+**Powerful AI for Freeplane mind maps** — supports OpenRouter, Gemini, Ollama, ERNIE, DashScope and more. Let AI read, edit, and build mind map nodes directly.
 
----
-
-## 目录
-
-- [技术栈概览](#技术栈概览)
-- [模块结构](#模块结构)
-- [核心模块详解](#核心模块详解)
-  - [freeplane_framework — 启动层](#freeplane_framework--启动层)
-  - [freeplane — 应用核心层](#freeplane--应用核心层)
-  - [freeplane_api — 公共 API 层](#freeplane_api--公共-api-层)
-- [插件模块详解](#插件模块详解)
-  - [freeplane_plugin_ai — AI 插件](#freeplane_plugin_ai--ai-插件)
-  - [freeplane_plugin_script — 脚本插件](#freeplane_plugin_script--脚本插件)
-  - [freeplane_plugin_formula — 公式插件](#freeplane_plugin_formula--公式插件)
-  - [freeplane_plugin_latex — LaTeX 插件](#freeplane_plugin_latex--latex-插件)
-  - [freeplane_plugin_markdown — Markdown 插件](#freeplane_plugin_markdown--markdown-插件)
-  - [freeplane_plugin_codeexplorer — 代码探索插件](#freeplane_plugin_codeexplorer--代码探索插件)
-  - [其他插件](#其他插件)
-- [辅助模块](#辅助模块)
-- [构建系统](#构建系统)
-- [运行方式](#运行方式)
-- [测试](#测试)
-- [国际化 (i18n)](#国际化-i18n)
-- [项目版本](#项目版本)
+![AI Chat Panel](docs/screenshots/ai-chat-panel.png)
+*AI Chat Panel with intelligent mind map interaction*
 
 ---
 
-## 技术栈概览
+## ✨ Features
 
-| 层次 | 技术 |
-|------|------|
-| 语言 | Java 8（编译目标），AI 插件使用 Java 17 |
-| UI 框架 | Java Swing |
-| 插件容器 | OSGi (Knopflerfish 8.0.11) |
-| 构建工具 | Gradle（多模块项目） |
-| AI 框架 | LangChain4j 1.10.0 |
-| 脚本引擎 | Apache Groovy 4.0.27 |
-| 测试框架 | JUnit 4 + AssertJ + Mockito |
-| 文件格式 | `.mm`（FreeMind 兼容 XML 格式） |
+### 💬 AI Chat Panel
+- **Right-tab integration**: seamlessly embedded in Freeplane UI
+- **Multi-turn conversation**: context memory up to 65 536 tokens
+- **Tool Call visualization**: clearly shows AI tool invocations
+- **Font scaling**: adjustable chat font size (50%–200%)
+- **Token counter**: real-time token usage display
 
----
+### 🧠 AI Smart Tool Calls
+AI can directly manipulate mind maps with **14 tools**:
 
-## 模块结构
+| Category | Method | Description |
+|----------|--------|-------------|
+| **Read nodes** | `readNodesWithDescendants` | Read a node and all its descendants |
+| **Fetch for editing** | `fetchNodesForEditing` | Get editable content fields (text, details, notes, attributes, etc.) |
+| **Create nodes** | `createNodes` | Batch-create nodes with hierarchical structure |
+| **Edit nodes** | `edit` | Unified edit API — text/details/notes/attributes/tags/icons/styles/hyperlinks/connectors |
+| **Move nodes** | `moveNodes` | Move nodes to a new parent |
+| **Delete nodes** | `deleteNodes` | Delete specified nodes |
+| **Search nodes** | `searchNodes` | Search nodes by content, with regex support |
+| **Select node** | `selectSingleNode` | Select and scroll to a specific node |
+| **Get selection** | `getSelectedMapAndNodeIdentifiers` | Get currently selected map and node identifiers |
+| **Create summary** | `createSummary` | Create a summary node aggregating child content |
+| **Move into summary** | `moveNodesIntoSummary` | Move nodes into a summary node |
+| **List icons** | `listAvailableIcons` | List application-level available icons |
+| **List styles** | `listMapStyles` | List styles defined in the target map |
+| **Edit connectors** | `editConnectors` | Edit connectors between nodes (source/target/labels) |
 
+### 🌐 Multi-Provider AI Support
+
+| Provider | Example Models | Config Key | Notes |
+|----------|---------------|------------|-------|
+| **OpenRouter** | GPT-5, Claude Sonnet 4.6, Gemini 2.5 Pro | `ai_openrouter_key` | Multi-model aggregator |
+| **Google Gemini** | gemini-3-pro, gemini-2.5-flash | `ai_gemini_key` | Google's latest AI models |
+| **Ollama** | llama3, mistral, qwen | `ai_ollama_service_address` | Local deployment, privacy-first |
+| **ERNIE** | ernie-4.5-turbo, deepseek-v3 | `ai_ernie_key` | Baidu — Chinese-optimized |
+| **DashScope** | qwen-max, qwen-plus | `ai_dashscope_key` | Alibaba Cloud AI service |
+
+### 🔌 MCP Server (Model Context Protocol)
+- **Port**: 6298 (configurable)
+- **Token auth**: secure access control
+- **External integration**: callable from Claude Desktop, Cursor, etc.
+- **Remote control**: operate Freeplane mind maps via API
+
+### 🎨 Three Interaction Modes
+
+#### 1️⃣ **Chat Mode**
+- **Use case**: discuss mind map content, get suggestions
+- **Features**:
+  - Natural-language dialogue
+  - AI answers do not modify the map directly
+  - Ideal for brainstorming and planning
+- **How to enable**: select "Chat" in the AI panel top-right
+
+#### 2️⃣ **Build Mode**
+- **Use case**: let AI create and edit mind maps automatically
+- **Features**:
+  - AI can directly manipulate nodes
+  - Auto-generate mind map structures
+  - Batch create, edit, and organize nodes
+- **How to enable**: select "Build" in the AI panel top-right
+- **Example prompt**:
+  ```
+  "Create a mind map about Machine Learning with Supervised, Unsupervised, and Reinforcement Learning branches"
+  ```
+
+#### 3️⃣ **Auto Mode**
+- **Use case**: AI intelligently decides when to chat and when to act
+- **Features**:
+  - AI picks the best interaction style
+  - Switches mode based on user intent
+  - Smartest and most efficient
+- **How to enable**: select "Auto" in the AI panel top-right
+
+### 🌟 Web Frontend (In Development)
+
+Modern web UI built with Vue 3 + TypeScript (`freeplane_plugin_ai/frontend` and `freeplane_web`):
+
+#### Core Features
+- **Responsive design**: desktop, tablet, and phone
+- **Node operations**: Tab to smart-create, Enter to quick-edit
+- **Fold/unfold**: toggle node folding with persisted state
+- **Delete confirmation**: elegant confirmation modal
+- **Canvas sync**: AI operation results reflect on canvas in real time
+
+#### AI Integration
+- **AI assistant panel**: chat with AI in the web interface
+- **Three-mode switch**: Chat / Build / Auto
+- **Model selection**: switch between AI providers
+- **Intelligent routing**: auto-select dialogue or tool call based on intent
+
+#### Tech Stack
 ```
-freeplane-1.13.x/
-├── freeplane_framework/        # 启动器 + OSGi 容器入口
-├── freeplane/                  # 应用核心（地图模型、UI、特性）
-├── freeplane_api/              # 公共 Java API（脚本/外部集成接口）
-├── freeplane_ant/              # Ant 构建辅助任务
-├── freeplane_debughelper/      # 开发调试配置
-├── freeplane_mac/              # macOS 平台适配
-├── JOrtho_0.4_freeplane/       # 内嵌拼写检查库
-│
-├── freeplane_plugin_ai/        # AI 对话 & 工具调用插件
-├── freeplane_plugin_script/    # Groovy 脚本引擎插件
-├── freeplane_plugin_formula/   # 公式计算插件
-├── freeplane_plugin_latex/     # LaTeX 渲染插件
-├── freeplane_plugin_markdown/  # Markdown 渲染插件
-├── freeplane_plugin_codeexplorer/ # Java 代码依赖分析插件
-├── freeplane_plugin_bugreport/ # Bug 报告插件
-├── freeplane_plugin_openmaps/  # OpenStreetMap 地图插件
-├── freeplane_plugin_svg/       # SVG 渲染插件
-├── freeplane_plugin_jsyntaxpane/ # 代码语法高亮组件
-│
-├── build.gradle                # 根构建配置（OSGi/BND/版本统一）
-├── settings.gradle             # 子模块注册
-├── dist.gradle                 # 发行版打包入口
-├── bin.dist.gradle             # BIN 目录构建
-├── win.dist.gradle             # Windows 安装包
-├── mac.dist.gradle             # macOS 应用包
-├── linux-packages.gradle       # Linux DEB/RPM 包
-└── src.dist.gradle             # 源码压缩包
-```
-
----
-
-## 核心模块详解
-
-### freeplane_framework — 启动层
-
-**职责**：应用程序入口，初始化 OSGi 容器，引导插件加载。
-
-关键类：
-
-| 类 | 说明 |
-|----|------|
-| `org.freeplane.launcher.Launcher` | 主启动类，可嵌入外部 Java 程序（headless 或 GUI 模式） |
-| `org.freeplane.launcher.Utils` | 路径/环境工具方法 |
-
-启动流程：
-
-```
-Launcher.create()
-  └─ 初始化 Knopflerfish OSGi 框架
-       └─ 加载 freeplane bundle（核心）
-            └─ 加载所有 freeplane_plugin_* bundles
-                 └─ 各插件 Activator.start() 注册扩展点
-```
-
-脚本与配置：
-- `freeplane_framework/script/freeplane.sh` / `freeplane.bat` — 启动脚本
-- `freeplane_framework/launch4j/` — Windows EXE 包装配置
-- `freeplane_framework/mac-appbundler/` — macOS .app 包配置
-
----
-
-### freeplane — 应用核心层
-
-**Bundle-SymbolicName**: `org.freeplane.core`
-
-**依赖关系**：`freeplane_api`（实现其接口）
-
-核心包结构：
-
-```
-org.freeplane.core/
-├── resources/      # ResourceController：配置/属性/i18n 管理
-├── ui/             # UITools、菜单系统、工具栏、选项面板
-├── io/             # 文件读写基础设施
-├── extension/      # IExtension：可插拔扩展点机制
-├── util/           # LogUtils、TextUtils、HtmlUtils 等工具类
-└── undo/           # 撤销/重做框架
-
-org.freeplane.features/
-├── map/            # 核心数据模型：MapModel、NodeModel、MapController
-│   ├── NodeModel   # 节点数据（文本、子节点、ID、样式引用）
-│   ├── MapModel    # 导图数据（根节点、元数据）
-│   └── MMapController # MindMap 编辑控制器
-├── text/           # 节点文本渲染与编辑（支持 HTML、纯文本）
-├── styles/         # 节点样式、条件样式、主题
-├── icon/           # 图标系统（内置图标 + 自定义图标）
-├── attribute/      # 节点属性（键值对扩展数据）
-├── link/           # 超链接与节点间连线（connectors）
-├── filter/         # 筛选/过滤节点
-├── note/           # 节点备注
-├── encrypt/        # 节点加密
-├── export/         # 导出框架（XSLT 基础）
-├── print/          # 打印支持
-└── mode/           # 模式系统（MindMap 模式 / 文件管理器模式）
-    └── MModeController # 主编辑模式控制器
-
-org.freeplane.main/
-├── application/    # 主应用程序初始化、命令行解析
-└── osgi/           # OSGi 服务接口（IModeControllerExtensionProvider 等）
+Frontend:  Vue 3 + TypeScript + Pinia + Vue Flow
+Backend:   Java 8/17 + LangChain4j + OSGi + built-in HTTP server
+Transport: REST API (port 6299) + MCP (port 6298)
 ```
 
-**关键扩展点**：`IModeControllerExtensionProvider` — 各插件通过此接口在 MindMap 模式下注册功能。
+### 🛠️ AI Edit Tracking
+- **State icon**: marks AI-modified nodes
+- **Persistence**: saves AI edit history
+- **Clear markers**: bulk-clear AI markers
+  - Map-wide: `Clear AI Markers in Map`
+  - Selection: `Clear AI Markers in Selection`
 
 ---
 
-### freeplane_api — 公共 API 层
+## 📦 Installation
 
-**职责**：定义面向脚本开发者和外部集成的稳定 Java 接口，不包含实现。
+### Option 1: .addon.mm Package (Recommended)
 
-核心接口：
+1. Download the latest package: [org.freeplane.plugin.ai.addon.mm](https://github.com/ymy-yry/freeplane-ai-recreating/releases/latest)
+2. Double-click the file, or in Freeplane: **Tools → Add-ons → Install**
+3. Restart Freeplane
 
-| 接口/类 | 说明 |
-|---------|------|
-| `Node` / `NodeRO` | 节点读写 / 只读接口（文本、属性、图标、样式、子节点操作） |
-| `MindMap` / `MindMapRO` | 导图读写 / 只读接口 |
-| `Controller` / `ControllerRO` | 应用控制器（获取当前节点、打开/关闭文件等） |
-| `Attributes` / `AttributesRO` | 节点属性操作 |
-| `Icons` / `IconsRO` | 图标操作 |
-| `Launcher` | 嵌入式启动（外部 Java 程序调用 Freeplane） |
-| `HeadlessMapCreator` | 无 GUI 创建/编辑导图 |
+### Option 2: Manual JAR Install
 
-**设计原则**：`*RO` 接口提供只读视图，`*` 接口继承并添加写操作，防止意外修改。
+1. Download the JAR: [freeplane_plugin_ai-1.13.3.jar](https://github.com/ymy-yry/freeplane-ai-recreating/releases/latest)
+2. Copy the JAR into Freeplane's `plugins` directory:
+   ```
+   Windows: %APPDATA%\Freeplane\plugins\
+   macOS:   ~/Library/Application Support/Freeplane/plugins/
+   Linux:   ~/.freeplane/plugins/
+   ```
+3. Restart Freeplane → **Tools → Add-ons** to verify
+
+### Option 3: Development Deployment
+
+```bash
+# Clone the repo
+git clone https://github.com/ymy-yry/freeplane-ai-recreating.git
+cd freeplane-ai-recreating
+
+# Build the plugin JAR
+cd freeplane_plugin_ai
+gradle jar
+
+# Generate the full .addon.mm package (recommended)
+gradle packageAddonMM
+
+# Output location:
+# build/outputs/org.freeplane.plugin.ai.addon.mm
+
+# Deploy to BIN directory (for dev testing)
+gradle deployToBin
+
+# Launch Freeplane
+../BIN/freeplane.bat  # Windows
+../BIN/freeplane.sh   # Linux/macOS
+```
+
+### 🎯 Build Commands
+
+```bash
+# 1. Compile the plugin
+gradle :freeplane_plugin_ai:compileJava
+
+# 2. Package the JAR
+gradle :freeplane_plugin_ai:jar
+
+# 3. Generate .addon.mm add-on package (with embedded binary data)
+gradle :freeplane_plugin_ai:packageAddonMM
+
+# 4. Deploy to Freeplane BIN directory
+gradle :freeplane_plugin_ai:deployToBin
+
+# 5. Run unit tests
+gradle :freeplane_plugin_ai:test
+
+# 6. Full build (compile + test + package)
+gradle build
+```
+
+### 📦 Build Artifacts
+
+| File | Size | Purpose |
+|------|------|---------|
+| `freeplane_plugin_ai-1.13.3.jar` | ~0.6 MB | JAR file — place manually in plugins directory |
+| `org.freeplane.plugin.ai.addon.mm` | ~0.8 MB | **Recommended** — full add-on package, double-click to install |
+
+> **💡 Tip**: the `.addon.mm` file contains all necessary binary data and can be installed directly in Freeplane with no extra steps.
 
 ---
 
-## 插件模块详解
+## ⚙️ Configure API Keys
 
-所有插件均遵循相同的 OSGi 结构：
-- `Activator.java` — 实现 `BundleActivator`，注册扩展
-- `build.gradle` — 声明 `ext.bundleActivator`、`ext.bundleImports`、`ext.bundleExports`
-- `src/main/resources/` — 偏好设置 XML、默认配置、图标资源
+### Option A: Via UI
+
+1. Open Freeplane
+2. **Tools → Preferences → AI**
+3. Fill in the API key for your chosen provider
+
+### Option B: Via Config File
+
+Edit `secrets.properties` in your Freeplane user directory:
+
+```properties
+# OpenRouter (recommended — multi-model)
+ai_openrouter_key=sk-or-v1-xxxxx
+
+# Google Gemini
+ai_gemini_key=AIza-xxxxx
+
+# ERNIE (Baidu)
+ai_ernie_key=bce-v3/ALTAK-xxxxx
+
+# DashScope (Alibaba Cloud)
+ai_dashscope_key=sk-xxxxx
+
+# Ollama (local deployment, optional)
+ai_ollama_service_address=http://localhost:11434
+```
+
+### Get an API Key
+
+| Provider | URL | Free Tier |
+|----------|-----|-----------|
+| OpenRouter | https://openrouter.ai/keys | $1 credit on signup |
+| Google Gemini | https://aistudio.google.com/app/apikey | Free |
+| ERNIE | https://qianfan.cloud.baidu.com/ | New-user credit |
+| DashScope | https://dashscope.console.aliyun.com/ | Free tier |
+| Ollama | https://ollama.ai/ | Completely free (local) |
 
 ---
 
-### freeplane_plugin_ai — AI 插件
+## 🚀 Usage Examples
 
-**Bundle**: `org.freeplane.plugin.ai`  
-**Java 版本**: Java 17（单独升级，其余模块为 Java 8）  
-**依赖**: LangChain4j 1.10.0
+### Example 1: Create a Mind Map (Build Mode)
 
-#### 整体架构
+**User input**:
+```
+Create a mind map about "Python Programming" with:
+- Basics (variables, data types, control flow)
+- Functions & Modules
+- Object-Oriented Programming
+- Popular Libraries (NumPy, Pandas, Requests)
+```
+
+**AI auto-executes**:
+1. Calls `createNodes` to create the root node "Python Programming"
+2. Uses hierarchical parameters to create 4 first-level branches
+3. Adds child nodes to each branch
+4. Auto-expands all nodes
+
+### Example 2: Edit Node Content (Build Mode)
+
+**User input**:
+```
+Select the "Machine Learning" node and expand it with 3 child nodes
+```
+
+**AI operations**:
+1. Calls `searchNodes` to locate the "Machine Learning" node
+2. Calls `createNodes` to create 3 children:
+   - Supervised Learning
+   - Unsupervised Learning
+   - Reinforcement Learning
+3. Adds a short description to each child
+
+### Example 3: Consultation (Chat Mode)
+
+**User input**:
+```
+My mind map is about "Web Development" — what important topics am I missing?
+```
+
+**AI answer**:
+```
+Based on the current map, consider adding:
+
+1. Frontend Frameworks (React, Vue, Angular)
+2. Backend Tech (Node.js, Django, Spring)
+3. Databases (MySQL, MongoDB, Redis)
+4. DevOps (Docker, CI/CD, cloud deployment)
+5. Security best practices
+
+Want me to add these for you?
+```
+
+### Example 4: Remote Call via MCP
+
+**Claude Desktop config**:
+```json
+{
+  "mcpServers": {
+    "freeplane": {
+      "command": "curl",
+      "args": ["http://localhost:6298/mcp"],
+      "env": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Claude conversation**:
+```
+Open the "Project Plan" mind map in Freeplane,
+and add a "UI Design Review" child node under "Phase 2"
+```
+
+---
+
+## 🔧 Advanced Configuration
+
+### Sampling Parameters
+
+> ⚠️ **Note**: some config keys below must be added manually to Freeplane's preferences or config file. Advanced Agent features are still in development.
+
+```properties
+# Temperature (creativity vs. determinism, 0.0–1.0)
+temperature=0.2
+
+# Top-P (sampling diversity, 0.0–1.0)
+top_p=0.9
+
+# Presence penalty (encourage new topics, -2.0 to 2.0)
+presence_penalty=0.0
+
+# Frequency penalty (reduce repetition, -2.0 to 2.0)
+frequency_penalty=0.0
+```
+
+### Display Settings
+
+```properties
+# Show Tool Call history
+ai_chat_shows_tool_calls=true
+
+# Font scaling percentage
+ai_chat_font_scaling=100
+
+# Token counter display mode
+ai_chat_token_counter_mode=visible
+
+# Auto-unfold parents when creating nodes
+ai_unfolds_parents_on_create=true
+
+# AI edit state-icon visibility
+ai_edits_state_icon_visible=true
+```
+
+---
+
+## 📊 Performance
+
+### Large Mind Maps
+- **Virtual scrolling**: render only visible nodes
+- **Incremental updates**: refresh only changed parts
+- **Lazy loading**: load collapsed nodes on demand
+- **Memory management**: auto-reclaim unused caches
+
+### AI Response Acceleration
+- **Streaming output**: display AI content in real time
+- **Concurrent requests**: call multiple tools in parallel
+- **Caching**: reuse identical AI responses
+- **Token optimization**: smart context trimming to save tokens
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue 1: AI Panel Does Not Appear
+
+**Cause**: Java version below 17
+
+**Solution**:
+```bash
+# Check Java version
+java -version
+
+# Java 17 or later is required
+# Download: https://adoptium.net/
+```
+
+### Issue 2: API Call Fails
+
+**Checklist**:
+- [ ] API Key is correctly configured
+- [ ] Network connection is working
+- [ ] Provider account has credit
+- [ ] Firewall is not blocking requests
+
+**Log location**:
+```
+Windows: %APPDATA%\Freeplane\freeplane.log
+macOS:   ~/Library/Application Support/Freeplane/freeplane.log
+Linux:   ~/.freeplane/freeplane.log
+```
+
+### Issue 3: Ollama Connection Fails
+
+**Solution**:
+```bash
+# 1. Start Ollama
+ollama serve
+
+# 2. Pull a model
+ollama pull llama3
+
+# 3. Test connectivity
+curl http://localhost:11434/api/tags
+
+# 4. Configure Freeplane
+ai_ollama_service_address=http://localhost:11434
+```
+
+### Issue 4: MCP Server Won't Start
+
+**Cause**: port 6298 is in use
+
+**Solution**:
+```properties
+# Change MCP port
+ai_mcp_server_port=6299
+```
+
+---
+
+## 📚 Developer Documentation
+
+### Project Structure
 
 ```
 freeplane_plugin_ai/
-├── bootstrap/          # Java 8 兼容引导层（Java8BootstrapActivator）
-│                       # 负责检测 Java 版本，Java 17+ 才加载主模块
-└── main/
-    ├── Activator.java  # 插件入口：注册聊天面板 + MCP 服务 + AI 编辑功能
-    ├── chat/           # 聊天对话子系统
-    ├── tools/          # AI 可调用的导图操作工具集
-    ├── edits/          # AI 编辑标记（高亮已 AI 修改的节点）
-    ├── maps/           # 多导图访问封装
-    └── mcpserver/      # Model Context Protocol (MCP) 服务器
+├── src/main/java/org/freeplane/plugin/ai/
+│   ├── Activator.java                      # OSGi plugin entry point
+│   ├── chat/                               # AI chat subsystem
+│   │   ├── AIChatPanel.java               # Chat panel UI
+│   │   ├── AIProviderConfiguration.java   # Provider config
+│   │   └── AIModelSelection.java          # Model selection
+│   ├── service/                            # AI service layer
+│   │   ├── AIServiceFactory.java          # Service factory
+│   │   ├── OpenRouterAIService.java       # OpenRouter impl
+│   │   ├── GeminiAIService.java           # Gemini impl
+│   │   └── OllamaAIService.java           # Ollama impl
+│   ├── tools/                              # AI tool set (14 tools)
+│   │   ├── AIToolSet.java                 # Tool set main class
+│   │   ├── create/                        # Node creation tools
+│   │   ├── edit/                          # Node editing tools
+│   │   ├── move/                          # Node moving tools
+│   │   ├── delete/                        # Node deletion tools
+│   │   ├── search/                        # Node search tools
+│   │   ├── read/                          # Node read tools
+│   │   └── selection/                     # Node selection tools
+│   ├── mcpserver/                          # MCP server
+│   │   └── ModelContextProtocolServer.java
+│   ├── restapi/                            # REST API
+│   │   └── RestApiServer.java
+│   └── edits/                              # AI edit tracking
+│       ├── AIEdits.java
+│       └── AiEditsStateIconProvider.java
+├── frontend/                               # Web frontend (Vue 3)
+│   ├── src/
+│   │   ├── components/                    # Vue components
+│   │   ├── views/                         # Page views
+│   │   └── stores/                        # Pinia state management
+│   └── package.json
+└── build.gradle                            # Gradle build config
 ```
 
-#### chat/ — 对话子系统
+### Build Commands (see Build Commands section above)
 
-```
-chat/
-├── AIChatPanel.java              # 主 UI 面板（Swing，嵌入右侧标签页）
-├── AIChatService.java            # LangChain4j AiServices 封装，执行 chat()
-├── AIChatModelFactory.java       # 根据 provider 名称创建 ChatModel 实例
-│                                 #   支持: openrouter / gemini / ollama
-├── AIProviderConfiguration.java  # 从 ResourceController 读取 API Key / 地址
-├── AIModelCatalog.java           # 从远端 API 获取并缓存可用模型列表
-├── AIModelDescriptor.java        # 模型描述（provider + modelName + displayName）
-├── AIModelSelection.java         # 选中模型的序列化值（"provider:modelName"）
-├── AssistantProfile.java         # 助手配置文件（系统指令 + 记忆设置）
-├── AssistantProfileChatMemory.java # 聊天记忆管理（token 上限驱逐策略）
-├── ChatRequestFlow.java          # 请求生命周期（开始/取消/结束/快照回滚）
-├── ChatTokenUsageTracker.java    # Token 用量统计
-├── LiveChatController.java       # 当前活跃对话的控制器
-└── history/                      # 对话历史持久化
-    └── ChatTranscriptStore.java  # 对话记录的 JSON 序列化存储
+> ⚠️ For the full list see the "Build Commands" section under Installation
+
+### Adding a New AI Provider
+
+1. Create a service class:
+```java
+public class NewProviderAIService implements IAIService {
+    @Override
+    public ChatResponse chat(ChatRequest request) {
+        // implement AI call logic
+    }
+}
 ```
 
-**模型 Provider 支持**：
-
-| Provider | API 路由 | 支持模型示例 |
-|----------|---------|------------|
-| `openrouter` | `https://openrouter.ai/api/v1`（可自定义） | GPT-4o、Claude 3.5、Llama 3 等数百个模型 |
-| `gemini` | Google AI Gemini API | gemini-2.0-flash、gemini-3-* |
-| `ollama` | 本地 Ollama 服务（可自定义地址） | 任意本地模型 |
-
-#### tools/ — 导图操作工具集
-
-AI 通过 LangChain4j `@Tool` 注解调用这些工具，直接操作思维导图：
-
-```
-tools/
-├── AIToolSet.java          # 所有 @Tool 方法的容器类（注册到 AiServices）
-├── AIToolSetBuilder.java   # AIToolSet 的构造器（依赖注入）
-├── create/                 # 创建节点：CreateNodesTool
-├── edit/                   # 编辑节点内容：文本/图标/属性/标签/样式/超链接
-├── delete/                 # 删除节点：DeleteNodesTool
-├── move/                   # 移动节点/创建摘要节点：MoveNodesTool、CreateSummaryTool
-├── read/                   # 读取节点内容：ReadNodesWithDescendantsTool
-├── search/                 # 搜索节点：SearchNodesTool（关键字/正则匹配）
-├── selection/              # 获取/设置选中节点
-├── content/                # 节点内容读写抽象（文本/属性/图标/标签/样式）
-└── utilities/              # ToolCallSummary、ToolCaller、ToolExecutorFactory
+2. Register in the factory:
+```java
+// Add to AIServiceFactory.java
+case "newprovider":
+    return new NewProviderAIService(configuration);
 ```
 
-#### mcpserver/ — MCP 服务器
-
-将导图操作工具通过 **Model Context Protocol** 暴露为 HTTP 服务，供外部 AI 客户端（Claude Desktop、Cursor 等）调用：
-
-```
-mcpserver/
-├── ModelContextProtocolServer.java     # HTTP 服务器（SSE + JSON-RPC 2.0）
-├── ModelContextProtocolToolRegistry.java # 工具注册与路由
-├── ModelContextProtocolToolDispatcher.java # 工具调用分发
-└── MCPAuthenticator.java               # Token 鉴权
-```
-
-#### edits/ — AI 编辑标记
-
-追踪 AI 修改过的节点，在节点旁显示状态图标，支持清除标记操作。
-
----
-
-### freeplane_plugin_script — 脚本插件
-
-**Bundle**: `org.freeplane.plugin.script`  
-**依赖**: Apache Groovy 4.0.27 + Apache Ivy 2.5.3（依赖管理）
-
-- 支持在节点中内嵌 Groovy 脚本，或从外部 `scripts/` 目录加载
-- 通过 `freeplane_api` 中的 `Node`、`MindMap`、`Controller` 接口操作导图
-- 暴露 `Proxy.java`（Groovy 脚本的 DSL 入口）、`FreeplaneScriptBaseClass`
-- **公共导出**：`org.freeplane.plugin.script`、`org.freeplane.plugin.script.proxy` 等包供其他插件依赖
-- 内置 Groovy 示例脚本位于 `scripts/` 目录
-
----
-
-### freeplane_plugin_formula — 公式插件
-
-**Bundle**: `org.freeplane.plugin.formula`  
-**依赖**: `freeplane_plugin_script`（复用 Groovy 引擎）
-
-- 支持节点文本以 `=` 开头时作为公式求值（类似电子表格）
-- 节点值可引用其他节点（通过节点 ID 或别名）
-- 公式结果实时显示，支持字符串/数字/日期运算
-
----
-
-### freeplane_plugin_latex — LaTeX 插件
-
-- 节点内容支持 LaTeX 数学公式渲染（通过内嵌 LaTeX 引擎）
-- 图标自动识别 `$...$` 或 `$$...$$` 标记并渲染为图片
-
----
-
-### freeplane_plugin_markdown — Markdown 插件
-
-- 节点文本支持 Markdown 语法渲染（`markedj` 库）
-- 与 `freeplane_plugin_ai` 共用此依赖（AI 回复的 Markdown 渲染）
-
----
-
-### freeplane_plugin_codeexplorer — 代码探索插件
-
-- 分析 Java 项目的包/类依赖关系，以思维导图形式可视化
-- 支持 ArchUnit 风格的架构规则检查
-
----
-
-### 其他插件
-
-| 插件 | 功能 |
-|------|------|
-| `freeplane_plugin_bugreport` | 异常捕获与 Bug 报告提交 |
-| `freeplane_plugin_openmaps` | 嵌入 OpenStreetMap 地图节点 |
-| `freeplane_plugin_svg` | SVG 图形渲染支持 |
-| `freeplane_plugin_jsyntaxpane` | 代码语法高亮组件（被 script/formula 插件依赖） |
-
----
-
-## 辅助模块
-
-| 模块 | 说明 |
-|------|------|
-| `freeplane_ant` | 自定义 Ant 任务（格式校验等，供 CI 使用） |
-| `freeplane_debughelper` | IDEA/Eclipse 运行配置、日志配置、安全策略 |
-| `freeplane_mac` | macOS 原生菜单适配（`NSApplicationListener`） |
-| `JOrtho_0.4_freeplane` | 拼写检查库（Freeplane 定制版 JOrtho） |
-
----
-
-## 构建系统
-
-### 全局构建配置（`build.gradle`）
-
-- **版本来源**：`freeplane/src/viewer/resources/version.properties`
-- **OSGi 工具**：`biz.aQute.bnd.gradle 7.1.0` 自动生成 `MANIFEST.MF`
-- **插件结构规范**：
-  - `pluginid` = `org.freeplane.plugin.<name>`
-  - `bundleActivator` = `pluginid + ".Activator"`
-  - 每个插件同时生成两个 JAR：`plugin-<ver>.jar`（无 OSGi Manifest）和 OSGi 主 JAR
-- **构建产物目录**：`BIN/`（开发运行）、`DIST/`（发行版）
-
-### 常用构建命令
-
-```bash
-# 编译所有模块
-gradle build
-
-# 仅编译核心模块
-gradle :freeplane:compileJava
-
-# 运行所有测试
-gradle test
-
-# 带详细错误输出的测试
-gradle test -PTestLoggingFull
-
-# 打包所有发行版
-gradle dist
-
-# 单独打包
-gradle win.dist      # Windows 安装包
-gradle mac.dist      # macOS .app 包
-gradle linux-packages # DEB/RPM 包
-
-# 翻译格式化（修改翻译文件后必须运行）
-gradle format_translation
-```
-
-### 构建后运行
-
-```bash
-# Windows
-BIN\freeplane.bat
-
-# Unix/macOS
-BIN/freeplane.sh
-```
-
----
-
-## 测试
-
-- **测试框架**：JUnit 4 + AssertJ + Mockito
-- **命名规范**：测试类以 `*Test` 结尾，或行为描述风格（如 `RuleReferenceShould`）
-- **测试位置**：每个模块的 `src/test/java/`
-
-关键测试模块：
-
-| 路径 | 内容 |
-|------|------|
-| `freeplane_plugin_ai/src/test/` | AI 插件单元测试（chat/tools/mcpserver） |
-| `freeplane/src/test/` | 核心功能测试 |
-| `freeplane_api/src/test/` | API 接口测试 |
-| `freeplane_uitest/` | UI 集成测试（HtmlUtils 等） |
-
----
-
-## 国际化 (i18n)
-
-- **翻译文件位置**：
-  - `freeplane/src/editor/resources/translations/Resources_*.properties`
-  - `freeplane/src/viewer/resources/translations/Resources_en.properties`
-- **编码**：ISO-8859-1，非 ASCII 字符使用 `\uXXXX` 转义
-- **修改后必须运行**：`gradle format_translation`
-- **验证方式**：
-  ```bash
-  file Resources_*.properties | grep -v "ASCII text"   # 应无输出
-  ```
-
----
-
-## 项目版本
-
-版本号定义在：`freeplane/src/viewer/resources/version.properties`
-
+3. Add config keys:
 ```properties
-freeplane_version=1.13.x
-freeplane_version_status=...
+ai_newprovider_key=
+ai_newprovider_service_address=
+ai_newprovider_model_list=
 ```
 
-所有模块统一使用根项目版本号，由 `build.gradle` 从该文件自动读取并注入。
+---
+
+## 🤝 Contributing
+
+### Filing Issues
+- Describe the problem
+- Provide reproduction steps
+- Attach log files
+- Include environment info (OS, Java version, Freeplane version)
+
+### Pull Requests
+1. Fork this repo
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit: `git commit -m 'Add amazing feature'`
+4. Push: `git push origin feature/amazing-feature`
+5. Open a PR
+
+### Code Style
+- **Java**: follow Google Java Style
+- **Frontend**: follow Vue Style Guide
+- **Commit messages**: use imperative mood (e.g. "Fix bug" not "Fixed bug")
+- **Tests**: new features must include unit tests
+
+---
+
+## 📄 License
+
+This project is licensed under **GNU General Public License v2.0**
+
+- Consistent with the Freeplane main project
+- Free to use, modify, and distribute
+- Modified code must remain open source
+
+See the [LICENSE](LICENSE) file for details.
+
+---
+
+## 📋 Release Guide
+
+### Tag Format
+
+```
+v1.13.3
+```
+
+### Release Title
+
+```
+v1.13.3 - AI Plugin for Freeplane
+```
+
+### Release Notes Template
+
+```markdown
+## 🤖 Freeplane AI Plugin v1.13.3
+
+AI-powered mind mapping for Freeplane — supports OpenRouter, Gemini, Ollama, ERNIE, DashScope and more.
+
+### ✨ Features
+- 💬 AI Chat Panel: integrated right-tab, multi-turn conversation, Tool Call visualization
+- 🧠 14 Smart Tools: create/edit/move/delete/search nodes, summaries, connector editing, etc.
+- 🌐 Multi-Provider AI: OpenRouter / Google Gemini / Ollama / ERNIE (Baidu) / DashScope (Alibaba)
+- 🔌 MCP Server: port 6298, callable from Claude Desktop, Cursor, etc.
+- 🎨 Three Modes: Chat (dialogue) / Build (construction) / Auto (intelligent routing)
+- 🛠️ AI Edit Tracking: state icons mark AI-modified nodes
+
+### 📦 Downloads
+| File | Description |
+|------|-------------|
+| `org.freeplane.plugin.ai.addon.mm` | **Recommended** — full add-on package, double-click or install via Freeplane |
+| `freeplane_plugin_ai-1.13.3.jar` | JAR file, manually place in the `plugins` directory |
+
+### 📥 Installation
+1. Download `org.freeplane.plugin.ai.addon.mm`
+2. Double-click the file, or in Freeplane: **Tools → Add-ons → Install**
+3. Restart Freeplane
+4. Configure API Key: **Tools → Preferences → AI**
+
+### ⚙️ Requirements
+- Freeplane 1.13.0 or later
+- Java 17 or later
+- At least one AI provider API key (Ollama local models require no key)
+
+### 🔧 Full Changelog
+See [AI_PLUGIN_README.md](https://github.com/ymy-yry/freeplane-ai-recreating/blob/main/freeplane_plugin_ai/AI_PLUGIN_README.md)
+```
+
+### Files to Upload
+
+| File | Path | Required |
+|------|------|----------|
+| `org.freeplane.plugin.ai.addon.mm` | `freeplane_plugin_ai/build/outputs/` | **Yes** |
+| `freeplane_plugin_ai-1.13.3.jar` | `freeplane_plugin_ai/build/libs/` | Optional |
+
+### Generate Release Files
+
+```bash
+cd freeplane_plugin_ai
+
+# One command to generate all release artifacts
+gradle packageAddonMM
+
+# Output:
+# build/outputs/org.freeplane.plugin.ai.addon.mm  ← upload to Release
+# build/libs/freeplane_plugin_ai-1.13.3.jar        ← upload to Release
+```
+
+---
+
+## 🙏 Acknowledgements
+
+- **Freeplane Team**: the powerful mind mapping platform
+- **LangChain4j**: excellent Java AI integration framework
+- **OpenRouter / Google / Baidu / Alibaba**: AI model services
+- **Community contributors**: all Issue reporters and PR authors
+
+---
+
+## 📞 Contact
+
+- **GitHub Issues**: https://github.com/ymy-yry/freeplane-ai-recreating/issues
+- **Email**: [238966298g@gmail.com](mailto:238966298g@gmail.com)
+- **Discussions**: https://github.com/ymy-yry/freeplane-ai-recreating/discussions
+
+---
+
+**Empower your mind maps with AI!** 🚀
